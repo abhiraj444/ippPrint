@@ -1,0 +1,15 @@
+{
+  "name": "relay-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240806.0",
+    "@types/node": "^26.2.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.0.0"
+  }
+}
