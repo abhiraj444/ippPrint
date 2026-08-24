@@ -345,25 +345,45 @@ export default function PrintKioskPage() {
       }
       const pdfBase64 = btoa(binary);
 
-      const res = await fetch('/api/print', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          printerSlug: printSettings.printerSlug,
-          documentName: mainDocName,
-          pdfBase64,
-          copies: printSettings.copies,
-          duplex: printSettings.duplex,
-        }),
-      });
+      const RELAY_WORKER_URL = 'https://relay-worker.abhinavip.workers.dev';
+      const printPayload = {
+        printerSlug: printSettings.printerSlug,
+        documentName: mainDocName,
+        pdfBase64,
+        copies: printSettings.copies,
+        duplex: printSettings.duplex,
+      };
 
-      const data = await res.json();
+      let res: Response;
+      try {
+        // 1. Try direct Cloudflare Worker relay (no 4.5MB Vercel serverless limit)
+        res = await fetch(`${RELAY_WORKER_URL}/api/print`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(printPayload),
+        });
+      } catch (directErr) {
+        console.warn('[Print] Direct relay notice, falling back to Next.js route:', directErr);
+        res = await fetch('/api/print', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(printPayload),
+        });
+      }
 
-      if (res.ok && data.success) {
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = { error: responseText.slice(0, 200) || `Server error (${res.status})` };
+      }
+
+      if (res.ok && (data.success || data.status === 'ok')) {
         setPrintSuccessMessage(`Print job "${mainDocName}" successfully dispatched to "${data.printer || selectedPrinter?.displayName}"!`);
         setIsPaymentModalOpen(false);
       } else {
-        throw new Error(data.error || 'Failed to dispatch print job to laptop printer');
+        throw new Error(data.error || `Failed to dispatch print job (${res.status})`);
       }
     } catch (err: any) {
       console.error('[Print] Error:', err);
