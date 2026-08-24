@@ -1,151 +1,125 @@
-# IPP Printer PoC — Remote Print Over the Internet
+# Cloud Print Platform & Kiosk 🖨️
 
-Expose a locally-connected printer to your Android phone over the internet, using the native "Add printer by IP/address" flow — no app required.
+A full-stack remote printing platform that allows users to upload documents (PDF, JPG, PNG, WEBP), apply **N-in-1 multi-page imposition grids**, **invert dark lecture slides to save ink/toner**, make online payments via **Razorpay**, and print directly to local Windows printers (`Canon imageRUNNER 7105`, `Brother`, `Epson`) over a **Cloudflare WebSocket tunnel**.
+
+---
+
+## 🏛️ System Architecture
 
 ```
-📱 Android Phone  ──(HTTPS/IPP)──▸  ☁️ Cloudflare Worker  ──(WebSocket)──▸  💻 Laptop Agent  ──▸  🖨️ Printer
-    (any network)                    (relay-worker)                          (laptop-agent)
+📱 / 💻 Web Browser (Vercel Web App)
+   │
+   ├─► 📂 Multi-File Uploader (PDF + JPG/PNG/WEBP)
+   ├─► 📐 N-in-1 Layout Imposition (1, 2, 3, 4, 6, 9-in-1 or custom NxM)
+   ├─► 🌓 Color Inverter & Toner Saver (Dark mode to crisp white)
+   ├─► 👁️ Real-Time Interactive Live Sheet Preview
+   ├─► 💰 Dynamic Price Calculator
+   └─► 💳 Razorpay Online Payment Gateway (UPI, GPay, Cards, NetBanking)
+         │
+         ▼ (Upon Payment Success / Free Kiosk Mode)
+   ☁️ Cloudflare Worker Relay API (`https://relay-worker.abhinavip.workers.dev`)
+         │
+         ▼ (High-Speed WebSocket Tunnel)
+   💻 Laptop Agent (Windows)
+         │
+         ▼ (Fast 150 DPI Grayscale RIP + Clean Document Title)
+   🖨️ Local Windows Printers (Canon iR7086-7105, Brother, Epson)
 ```
 
-## Prerequisites
+---
 
-- **Node.js 18+** and **npm**
-- **Cloudflare account** (free tier) with [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) installed
-- A **printer** connected to your laptop
-- An **Android phone** (8+) with Default Print Service enabled
+## ✨ Features
 
-## Quick Start
+### 1. 📂 Multi-File Upload & Merge
+- Upload multiple PDFs and images (PNG, JPG, JPEG, WEBP) simultaneously.
+- Automatic image-to-PDF conversion with aspect ratio preservation.
+- Merges all uploaded documents into a single print job.
 
-### 1. Deploy the Relay Worker
+### 2. 📐 N-in-1 Multi-Page Imposition Grid
+- **Presets**: 1-in-1, 2-in-1, 3-in-1, 4-in-1 (2×2), 6-in-1, 9-in-1, or custom NxM.
+- **Controls**: Auto-fit orientation (Portrait / Landscape), page borders, margins, and gutters.
+- Drastically reduces the number of sheets needed.
 
-```bash
-cd relay-worker
-npm install
-npx wrangler login          # One-time Cloudflare auth
-npx wrangler deploy         # Deploys to relay-worker.<your-subdomain>.workers.dev
-```
+### 3. 🌓 Color Inverter & Toner Saver
+- Inverts white-on-black / dark lecture notes and presentations to clean black-on-white.
+- Supports **Invert All Pages** or **Invert Specific Page Ranges** (e.g. `1, 3-5, 8`).
+- High-contrast thresholding eliminates gray background noise.
 
-Note your Worker URL (e.g., `relay-worker.your-subdomain.workers.dev`).
+### 4. 👁️ Interactive Live Sheet Preview
+- Client-side Canvas rendering powered by `PDF.js`.
+- Shows the exact sheet layout, miniature page borders, and inverted colors in real time.
+- Zoom controls and sheet-by-sheet navigation.
 
-### 2. Start the Laptop Agent
+### 5. 💳 Razorpay Payment Gateway & Kiosk Mode
+- Real-time sheet count & price calculation.
+- Integrated **Razorpay Checkout** supporting UPI (GPay, PhonePe, Paytm), Debit/Credit Cards, NetBanking, and QR codes.
+- **Free / Admin Kiosk Mode Toggle**: Enables direct printing for testing or owner use without payment.
 
-```bash
-cd laptop-agent
-npm install
+### 6. ⚡ Production Copier RIP & Clean Document Title
+- Pre-rasterizes documents to **8-bit Grayscale 150 DPI bitmaps (`pdfimage8`)** for monochrome copiers like `Canon iR7086-7105`, accelerating print speeds by 300%.
+- Fixes the Windows Print Spooler title bug: displays the clean original document name (`Invoice.pdf`) on the printer's LCD screen instead of the full temp file path.
 
-# Set your relay URL
-set RELAY_URL=relay-worker.your-subdomain.workers.dev
+---
 
-# Start the agent
-npm start
-```
-
-On first run, the agent will:
-1. Discover your local printers
-2. Ask which to expose and what public name to use
-3. Save the config to `printers.json`
-
-### 3. Generate Test Fixtures
-
-```bash
-npx tsx test/generate-ipp-test.ts
-```
-
-### 4. Verify (from desktop)
-
-```powershell
-.\test\test-ipp.ps1 -RelayUrl "relay-worker.your-subdomain.workers.dev" -Slug "home-printer"
-```
-
-### 5. Add Printer on Android
-
-1. Go to **Settings → Connected devices → Printing → Default Print Service**
-2. Tap **☰ → Add printer**
-3. Enter: `ipps://relay-worker.your-subdomain.workers.dev/printers/home-printer`
-4. The printer should appear as ready with your configured display name
-5. Print a test page from any app!
-
-## Project Structure
+## 📁 Repository Structure
 
 ```
 ippPrint/
-├── relay-worker/                # Cloudflare Worker (byte relay)
+├── web-app/                     # Next.js 14 Web App (Deploy to Vercel)
 │   ├── src/
-│   │   ├── index.ts             # Worker entry point, routing
-│   │   └── tunnel-do.ts         # Durable Object: WebSocket relay
-│   ├── wrangler.toml            # Cloudflare config
-│   └── package.json
-├── laptop-agent/                # Node.js agent (IPP + print)
+│   │   ├── app/
+│   │   │   ├── page.tsx         # Main Kiosk interface
+│   │   │   ├── api/
+│   │   │   │   ├── printers/    # Fetches live printers from Cloudflare relay
+│   │   │   │   ├── print/       # Dispatches transformed PDF to relay
+│   │   │   │   └── payment/     # Razorpay order creation & signature verification
+│   │   ├── components/          # Uploader, NupSettings, InkSaver, LivePreview, PaymentModal
+│   │   └── lib/                 # pdf-processor.ts, color-inverter.ts, razorpay.ts
+├── relay-worker/                # Cloudflare Worker & Durable Object (WebSocket byte relay)
 │   ├── src/
-│   │   ├── index.ts             # Main entry, request routing
-│   │   ├── tunnel-client.ts     # WebSocket client to relay
-│   │   ├── ipp-handler.ts       # IPP binary protocol (5 operations)
-│   │   ├── printer-discovery.ts # Local printer enumeration
-│   │   ├── printer-config.ts    # Config management, first-run CLI
-│   │   └── print-spooler.ts     # Submit jobs to OS print queue
-│   ├── printers.json            # Generated printer config
-│   └── package.json
-├── test/
-│   ├── generate-ipp-test.ts     # Generate test IPP binaries
-│   └── test-ipp.ps1             # PowerShell verification script
+│   │   ├── index.ts             # REST & IPP routing + CORS headers
+│   │   └── tunnel-do.ts         # Fast native buffer byte forwarding
+│   └── wrangler.toml
+├── laptop-agent/                # Windows Agent (Node.js + Ghostscript + SumatraPDF)
+│   ├── src/
+│   │   ├── index.ts             # REST + IPP request dispatcher
+│   │   ├── print-spooler.ts     # 150 DPI fast rasterizer & clean job naming
+│   │   ├── printer-config.ts    # Printer discovery & slug configuration
+│   │   └── tunnel-client.ts     # WebSocket tunnel connection
+│   └── printers.json
+├── start-background.bat         # Starts laptop-agent silently in background
+├── stop-background.bat          # Stops running agent process
 └── README.md
 ```
 
-## Configuration
+---
 
-### Environment Variables (laptop-agent)
+## 🚀 Deployment Guide
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RELAY_URL` | `relay-worker.your-subdomain.workers.dev` | Your deployed Worker URL |
-| `DEVICE_ID` | `default` | Device identifier for the tunnel |
-| `USE_TLS` | `true` | Use `wss://` (set to `false` for local dev with `wrangler dev`) |
+### Deploying the Web App to Vercel
 
-### printers.json
+1. Push this repository to GitHub.
+2. Go to [Vercel](https://vercel.com) and click **Add New Project**.
+3. Import your GitHub repository (`abhiraj444/ippPrint`).
+4. Set **Root Directory** to `web-app`.
+5. Configure Environment Variables in Vercel:
+   - `RELAY_WORKER_URL`: `https://relay-worker.abhinavip.workers.dev`
+   - `NEXT_PUBLIC_RAZORPAY_KEY_ID`: *(Your Razorpay Key ID)*
+   - `RAZORPAY_KEY_ID`: *(Your Razorpay Key ID)*
+   - `RAZORPAY_KEY_SECRET`: *(Your Razorpay Key Secret)*
+   *(If Razorpay keys are omitted, the app automatically runs in Test/Mock Mode).*
+6. Click **Deploy**!
 
-```json
-{
-  "exposed": [
-    {
-      "localName": "HP_LaserJet_M1132",
-      "publicSlug": "home-printer",
-      "displayName": "My Home Printer"
-    }
-  ]
-}
+---
+
+### Running the Laptop Agent
+
+To start the agent silently in the background:
+```bat
+start-background.bat
 ```
 
-Each exposed printer gets its own URL: `ipps://<relay>/printers/<slug>`
-
-## IPP Operations Implemented
-
-| Operation | ID | Purpose |
-|---|---|---|
-| Get-Printer-Attributes | 0x000B | Printer discovery/status check |
-| Validate-Job | 0x0004 | Pre-flight validation |
-| Print-Job | 0x0002 | Send and print a document |
-| Get-Jobs | 0x000A | List queued jobs |
-| Get-Job-Attributes | 0x0009 | Job status check |
-| Cancel-Job | 0x0008 | Cancel a job (no-op) |
-
-## Local Development
-
-```bash
-# Terminal 1: Start Worker locally
-cd relay-worker
-npx wrangler dev
-
-# Terminal 2: Start agent (pointing to local Worker)
-cd laptop-agent
-set RELAY_URL=localhost:8787
-set USE_TLS=false
-npm run dev
+To stop the agent:
+```bat
+stop-background.bat
 ```
-
-## Limitations (PoC)
-
-- Single device/user only
-- No authentication/access control
-- Print jobs limited by Cloudflare WebSocket message size (~1MB)
-- Job state always returns "completed" (no real queue tracking)
-- No automatic printer discovery (manual "Add by address" only)

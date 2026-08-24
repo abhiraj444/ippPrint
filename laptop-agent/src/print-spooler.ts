@@ -1,14 +1,19 @@
 import { createRequire } from 'module';
-import { exec, execSync } from 'child_process';
+import { exec, execFile, execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const require = createRequire(import.meta.url);
 const pdfToPrinter = require('pdf-to-printer');
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const PRINT_AS_IMAGE = process.env.PRINT_AS_IMAGE !== 'false'; // default true
 const RASTER_DPI = parseInt(process.env.IMAGE_DPI || '150', 10); // default 150 DPI
@@ -106,7 +111,7 @@ export async function printDocument(
   await fs.mkdir(jobDir, { recursive: true });
 
   const tempFile = path.join(jobDir, fileName);
-  const rasterFile = path.join(jobDir, `raster-${fileName}`);
+  const rasterFile = path.join(jobDir, `raster-temp.pdf`);
   
   let fileToPrint = tempFile;
 
@@ -118,15 +123,30 @@ export async function printDocument(
     if (PRINT_AS_IMAGE) {
       const isColor = isColorPrinter(printerName);
       const success = await rasterizePdf(tempFile, rasterFile, RASTER_DPI, isColor);
-      if (success) {
-        fileToPrint = rasterFile;
+      if (success && fsSync.existsSync(rasterFile)) {
+        // Overwrite tempFile with the rasterized PDF so the final file in jobDir has the exact clean fileName
+        await fs.copyFile(rasterFile, tempFile);
+        try { await fs.unlink(rasterFile); } catch {}
+        fileToPrint = tempFile;
       }
     }
 
     const platform = os.platform();
     if (platform === 'win32') {
-      console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Windows via pdf-to-printer...`);
-      await pdfToPrinter.print(fileToPrint, { printer: printerName });
+      console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Windows with clean document title...`);
+      
+      const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
+      if (fsSync.existsSync(sumatraExe)) {
+        // Pass only the relative filename and set cwd to jobDir.
+        // This causes Windows Spooler and the printer screen to display "DocumentName.pdf" rather than "C:\Users\..."
+        await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
+          cwd: jobDir,
+          windowsHide: true
+        });
+      } else {
+        await pdfToPrinter.print(fileToPrint, { printer: printerName });
+      }
+
       console.log(`[printer] Successfully sent "${fileName}" (job ${jobId}) to printer "${printerName}"`);
     } else {
       console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Unix-like...`);
