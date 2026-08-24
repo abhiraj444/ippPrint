@@ -232,20 +232,15 @@ export default function PrintKioskPage() {
       try {
         setIsProcessing(true);
         const sortedSelectedIndices = Array.from(selectedPages).sort((a, b) => a - b);
+        const sortedInvertedIndices = Array.from(invertedPages).sort((a, b) => a - b);
 
-        // 1. If any pages are marked for inversion, apply pixel-level inversion to the PDF binary
-        let processedSourcePdf = originalPdfBytes;
-        if (invertedPages.size > 0) {
-          const { invertPdfPages } = await import('@/lib/pdf-processor');
-          processedSourcePdf = await invertPdfPages(originalPdfBytes, Array.from(invertedPages));
-        }
-
-        // 2. Apply N-in-1 layout imposition with clean Document Title
+        // Apply N-in-1 layout imposition and color inversion in a single high-fidelity pass
         const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(
-          processedSourcePdf,
+          originalPdfBytes,
           nupOptions,
           mainDocName,
-          sortedSelectedIndices
+          sortedSelectedIndices,
+          sortedInvertedIndices
         );
 
         if (isCancelled) return;

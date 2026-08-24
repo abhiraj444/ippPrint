@@ -174,7 +174,7 @@ export async function printDocument(
 
           if (imageFiles.length > 0) {
             console.log(`[printer] Spooling ${imageFiles.length} page(s) via PowerShell PrintDocument with Title "${cleanName}"...`);
-            const psCmd = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${psScript}" -PrinterName "${printerName}" -DocumentName "${cleanName}" -ImageFiles ${imageFiles.map((f) => `"${f}"`).join(',')}`;
+            const psCmd = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${psScript}" -PrinterName "${printerName}" -DocumentName "${cleanName}" -ImageFolder "${jobDir}" -Copies 1`;
             await execAsync(psCmd, { windowsHide: true });
             spooled = true;
             console.log(`[printer] Native Windows PrintDocument successfully spooled "${cleanName}"!`);

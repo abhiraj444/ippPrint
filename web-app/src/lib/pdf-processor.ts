@@ -125,40 +125,39 @@ export async function invertPdfPages(
 }
 
 /**
- * Create N-in-1 Imposition Layout on the given PDF document
+ * Create N-in-1 Imposition Layout on the given PDF document with optional page selection and color inversion
  */
 export async function applyNupLayout(
   sourcePdfBytes: Uint8Array,
   options: NupOptions,
   documentTitle?: string,
-  selectedPageIndices?: number[]
+  selectedPageIndices?: number[],
+  invertedPageIndices?: number[]
 ): Promise<{ pdfBytes: Uint8Array; totalSheets: number }> {
   const { nup = 1, orientation = 'auto', drawBorders = true, marginPt = 20, gutterPt = 10, paperSize = 'A4' } = options;
 
-  const srcDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
-  const allSrcPages = srcDoc.getPages();
-  
-  // Filter pages if selectedPageIndices is specified
+  const pdfjsLib = await import('pdfjs-dist');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
+
+  const loadingTask = pdfjsLib.getDocument({
+    data: sourcePdfBytes.slice(),
+    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/cmaps/`,
+    cMapPacked: true,
+  });
+
+  const pdfDoc = await loadingTask.promise;
+  const numPages = pdfDoc.numPages;
+
+  // Filter page indices (0-based)
   const filteredIndices = selectedPageIndices && selectedPageIndices.length > 0
-    ? selectedPageIndices.filter(idx => idx >= 0 && idx < allSrcPages.length)
-    : srcDoc.getPageIndices();
+    ? selectedPageIndices.filter((idx) => idx >= 0 && idx < numPages)
+    : Array.from({ length: numPages }, (_, i) => i);
 
   if (filteredIndices.length === 0) {
     throw new Error('No pages selected to print');
   }
 
-  // If nup === 1, copy only selected pages
-  if (nup === 1) {
-    const singleDoc = await PDFDocument.create();
-    if (documentTitle) {
-      singleDoc.setTitle(documentTitle);
-      singleDoc.setSubject(documentTitle);
-      singleDoc.setProducer('Cloud Print Kiosk');
-    }
-    const copiedPages = await singleDoc.copyPages(srcDoc, filteredIndices);
-    copiedPages.forEach(p => singleDoc.addPage(p));
-    return { pdfBytes: await singleDoc.save(), totalSheets: singleDoc.getPageCount() };
-  }
+  const invertSet = new Set(invertedPageIndices || []);
 
   let cols = 1;
   let rows = 1;
@@ -170,13 +169,6 @@ export async function applyNupLayout(
   else if (options.rows && options.cols) {
     rows = options.rows;
     cols = options.cols;
-  }
-
-  const outDoc = await PDFDocument.create();
-  if (documentTitle) {
-    outDoc.setTitle(documentTitle);
-    outDoc.setSubject(documentTitle);
-    outDoc.setProducer('Cloud Print Kiosk');
   }
 
   const [baseW, baseH] = PAPER_DIMENSIONS[paperSize] || PAPER_DIMENSIONS.A4;
@@ -192,71 +184,104 @@ export async function applyNupLayout(
     sheetH = Math.max(baseW, baseH);
   }
 
+  const outDoc = await PDFDocument.create();
+  if (documentTitle) {
+    outDoc.setTitle(documentTitle);
+    outDoc.setSubject(documentTitle);
+    outDoc.setProducer('Cloud Print Kiosk');
+  }
+
   const slotsPerPage = rows * cols;
   const totalSheets = Math.ceil(filteredIndices.length / slotsPerPage);
 
-  const usableW = sheetW - 2 * marginPt - (cols - 1) * gutterPt;
-  const usableH = sheetH - 2 * marginPt - (rows - 1) * gutterPt;
+  // Render scale factor for crisp 300 DPI print quality
+  const renderScale = 2.0;
+
+  const usableW = (sheetW - 2 * marginPt - (cols - 1) * gutterPt) * renderScale;
+  const usableH = (sheetH - 2 * marginPt - (rows - 1) * gutterPt) * renderScale;
 
   const cellW = usableW / cols;
   const cellH = usableH / rows;
 
   for (let sheetIdx = 0; sheetIdx < totalSheets; sheetIdx++) {
-    const outPage = outDoc.addPage([sheetW, sheetH]);
+    // 1. Create a Master Canvas for the sheet
+    const sheetCanvas = document.createElement('canvas');
+    sheetCanvas.width = Math.round(sheetW * renderScale);
+    sheetCanvas.height = Math.round(sheetH * renderScale);
+    const sCtx = sheetCanvas.getContext('2d');
+    if (!sCtx) continue;
+
+    // Fill master sheet with clean white background
+    sCtx.fillStyle = '#ffffff';
+    sCtx.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
 
     for (let slotIdx = 0; slotIdx < slotsPerPage; slotIdx++) {
       const targetItemIdx = sheetIdx * slotsPerPage + slotIdx;
       if (targetItemIdx >= filteredIndices.length) break;
 
       const srcPageIdx = filteredIndices[targetItemIdx];
-      const srcPage = allSrcPages[srcPageIdx];
-      const mediaBox = srcPage.getMediaBox() || { x: 0, y: 0, width: srcPage.getWidth(), height: srcPage.getHeight() };
-      const rotation = (srcPage.getRotation()?.angle || 0) % 360;
+      const pageNum = srcPageIdx + 1;
+      const page = await pdfDoc.getPage(pageNum);
 
-      const [embeddedPage] = await outDoc.embedPages([srcPage]);
-
-      const isRotated90or270 = rotation === 90 || rotation === 270;
-      const origW = isRotated90or270 ? (mediaBox.height || embeddedPage.height) : (mediaBox.width || embeddedPage.width);
-      const origH = isRotated90or270 ? (mediaBox.width || embeddedPage.width) : (mediaBox.height || embeddedPage.height);
-
+      // Grid position in canvas coordinates (top to bottom, left to right)
       const r = Math.floor(slotIdx / cols);
       const c = slotIdx % cols;
 
-      const cellX = marginPt + c * (cellW + gutterPt);
-      const cellY = sheetH - marginPt - (r + 1) * cellH - r * gutterPt;
+      const cellX = marginPt * renderScale + c * (cellW + gutterPt * renderScale);
+      const cellY = marginPt * renderScale + r * (cellH + gutterPt * renderScale);
 
-      const scaleW = cellW / origW;
-      const scaleH = cellH / origH;
-      const scale = Math.min(scaleW, scaleH);
+      // Render miniature page to its own canvas
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const fitScale = Math.min(cellW / unscaledViewport.width, cellH / unscaledViewport.height);
+      const viewport = page.getViewport({ scale: fitScale });
 
-      const fittedW = origW * scale;
-      const fittedH = origH * scale;
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = Math.round(viewport.width);
+      pageCanvas.height = Math.round(viewport.height);
+      const pCtx = pageCanvas.getContext('2d');
+      if (!pCtx) continue;
 
-      const drawX = cellX + (cellW - fittedW) / 2;
-      const drawY = cellY + (cellH - fittedH) / 2;
+      pCtx.fillStyle = '#ffffff';
+      pCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
 
-      // Adjust for non-zero MediaBox / CropBox origins so content is never drawn offscreen
-      const adjustedX = drawX - (mediaBox.x || 0) * scale;
-      const adjustedY = drawY - (mediaBox.y || 0) * scale;
+      await page.render({ canvasContext: pCtx, viewport }).promise;
 
-      outPage.drawPage(embeddedPage, {
-        x: adjustedX,
-        y: adjustedY,
-        width: embeddedPage.width * scale,
-        height: embeddedPage.height * scale,
-      });
+      // Apply color inversion if this page is marked
+      if (invertSet.has(srcPageIdx)) {
+        invertCanvasImageData(pCtx, pageCanvas.width, pageCanvas.height, true);
+      }
 
+      // Center the page within the cell
+      const drawX = cellX + (cellW - pageCanvas.width) / 2;
+      const drawY = cellY + (cellH - pageCanvas.height) / 2;
+
+      sCtx.drawImage(pageCanvas, drawX, drawY);
+
+      // Optional subtle dividing border around miniature page
       if (drawBorders) {
-        outPage.drawRectangle({
-          x: drawX,
-          y: drawY,
-          width: fittedW,
-          height: fittedH,
-          borderColor: rgb(0.75, 0.75, 0.75),
-          borderWidth: 0.5,
-        });
+        sCtx.strokeStyle = '#d1d5db';
+        sCtx.lineWidth = 1;
+        sCtx.strokeRect(drawX, drawY, pageCanvas.width, pageCanvas.height);
       }
     }
+
+    // Convert sheet canvas to JPEG image bytes
+    const sheetDataUrl = sheetCanvas.toDataURL('image/jpeg', 0.95);
+    const base64Data = sheetDataUrl.split(',')[1];
+    const binaryStr = atob(base64Data);
+    const imageBytes = new Uint8Array(binaryStr.length);
+    for (let j = 0; j < binaryStr.length; j++) {
+      imageBytes[j] = binaryStr.charCodeAt(j);
+    }
+
+    const embeddedImg = await outDoc.embedJpg(imageBytes);
+    const outPage = outDoc.addPage([sheetW, sheetH]);
+    outPage.drawImage(embeddedImg, {
+      x: 0,
+      y: 0,
+      width: sheetW,
+      height: sheetH,
+    });
   }
 
   const pdfBytes = await outDoc.save();
