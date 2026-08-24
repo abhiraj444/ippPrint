@@ -145,49 +145,48 @@ export default function PrintKioskPage() {
 
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
-        const buffer = new Uint8Array(await file.arrayBuffer());
-        const isPdf = file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
-        const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
+        try {
+          const buffer = new Uint8Array(await file.arrayBuffer());
+          const isPdf = file.type.includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
+          const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name);
 
-        let pdfBytes: Uint8Array;
-        if (isPdf) {
-          pdfBytes = buffer;
-        } else if (isImage) {
-          pdfBytes = await imageToPdf(buffer, file.type || 'image/jpeg');
-        } else {
-          pdfBytes = buffer;
+          let pdfBytes: Uint8Array;
+          if (isPdf) {
+            pdfBytes = buffer;
+          } else if (isImage) {
+            pdfBytes = await imageToPdf(buffer, file.type || 'image/jpeg');
+          } else {
+            pdfBytes = buffer;
+          }
+
+          const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+          const pageCount = srcDoc.getPageCount();
+
+          const allPages = new Set<number>();
+          for (let p = 0; p < pageCount; p++) allPages.add(p);
+
+          newDocs.push({
+            id: `${timestamp}-${i}-${Math.random().toString(36).substring(2, 8)}`,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            pdfBytes,
+            pageCount,
+            selectedPages: allPages,
+            invertedPages: new Set<number>(),
+            nupOptions: { ...DEFAULT_NUP },
+            includedInPrint: true,
+          });
+        } catch (fileErr: any) {
+          console.warn(`[handleFilesAdded] Error processing file "${file.name}":`, fileErr);
         }
-
-        const srcDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-        const pageCount = srcDoc.getPageCount();
-
-        const allPages = new Set<number>();
-        for (let p = 0; p < pageCount; p++) allPages.add(p);
-
-        newDocs.push({
-          id: `${timestamp}-${i}-${Math.random().toString(36).substring(2, 8)}`,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          pdfBytes,
-          pageCount,
-          selectedPages: allPages,
-          invertedPages: new Set<number>(),
-          nupOptions: { ...DEFAULT_NUP },
-          includedInPrint: true,
-        });
       }
 
-      setDocuments((prev) => {
-        const combined = [...prev, ...newDocs];
-        if (!activeDocId && combined.length > 0) {
-          setActiveDocId(combined[0].id);
-        }
-        return combined;
-      });
-
-      if (!activeDocId && newDocs.length > 0) {
-        setActiveDocId(newDocs[0].id);
+      if (newDocs.length > 0) {
+        setDocuments((prev) => [...prev, ...newDocs]);
+        setActiveDocId((prev) => prev || newDocs[0].id);
+      } else {
+        setPrintErrorMessage('Could not load the selected file(s). Please try standard PDF or PNG/JPG files.');
       }
     } catch (err: any) {
       console.error('[Uploader] Error parsing files:', err);
@@ -511,53 +510,7 @@ export default function PrintKioskPage() {
         </div>
       )}
 
-      {/* Hidden File Inputs for Android and Desktop multi-selection */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
-        onChange={(e) => {
-          if (e.target.files) handleFilesAdded(e.target.files);
-          e.target.value = '';
-        }}
-        className="hidden"
-      />
-      <input
-        ref={pdfInputRef}
-        type="file"
-        multiple
-        accept="application/pdf,.pdf"
-        onChange={(e) => {
-          if (e.target.files) handleFilesAdded(e.target.files);
-          e.target.value = '';
-        }}
-        className="hidden"
-      />
-      <input
-        ref={imageInputRef}
-        type="file"
-        multiple
-        accept="image/*"
-        onChange={(e) => {
-          if (e.target.files) handleFilesAdded(e.target.files);
-          e.target.value = '';
-        }}
-        className="hidden"
-      />
-      <input
-        ref={anyInputRef}
-        type="file"
-        multiple
-        accept="*/*"
-        onChange={(e) => {
-          if (e.target.files) handleFilesAdded(e.target.files);
-          e.target.value = '';
-        }}
-        className="hidden"
-      />
-
-      {/* Drag & Drop Multi-file Upload Bar with Android-optimized buttons */}
+      {/* Drag & Drop Multi-file Upload Bar with Native Android & Desktop Multi-Select Labels */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -575,11 +528,18 @@ export default function PrintKioskPage() {
             : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900'
         }`}
       >
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-4 text-left cursor-pointer flex-1"
-        >
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
+        <label className="flex items-center gap-4 text-left cursor-pointer flex-1 group">
+          <input
+            type="file"
+            multiple
+            accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
+            onChange={(e) => {
+              if (e.target.files) handleFilesAdded(e.target.files);
+              e.target.value = '';
+            }}
+            className="sr-only"
+          />
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
             <UploadCloud className="w-6 h-6" />
           </div>
           <div>
@@ -589,38 +549,56 @@ export default function PrintKioskPage() {
                 : 'Add More Files to Print Queue'}
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Select multiple PDFs or photos from your Android phone or computer
+              Tap here or drop multiple files (hold Ctrl / Shift on laptop, long-press on Android)
             </p>
           </div>
-        </div>
+        </label>
 
-        {/* Mobile & Desktop Tap-Friendly Selectors */}
+        {/* Mobile & Desktop Tap-Friendly Native Selectors */}
         <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => pdfInputRef.current?.click()}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all"
-          >
+          <label className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all cursor-pointer">
             <FileText className="w-4 h-4" />
             <span>+ Add PDFs</span>
-          </button>
+            <input
+              type="file"
+              multiple
+              accept="application/pdf,.pdf"
+              onChange={(e) => {
+                if (e.target.files) handleFilesAdded(e.target.files);
+                e.target.value = '';
+              }}
+              className="sr-only"
+            />
+          </label>
 
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
-          >
+          <label className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all cursor-pointer">
             <Plus className="w-4 h-4" />
             <span>+ Add Photos</span>
-          </button>
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={(e) => {
+                if (e.target.files) handleFilesAdded(e.target.files);
+                e.target.value = '';
+              }}
+              className="sr-only"
+            />
+          </label>
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="px-3.5 py-2.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all"
-          >
+          <label className="px-3.5 py-2.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer">
             <span>Browse Any</span>
-          </button>
+            <input
+              type="file"
+              multiple
+              accept="*/*"
+              onChange={(e) => {
+                if (e.target.files) handleFilesAdded(e.target.files);
+                e.target.value = '';
+              }}
+              className="sr-only"
+            />
+          </label>
         </div>
       </div>
 
