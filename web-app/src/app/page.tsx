@@ -6,9 +6,10 @@ import { NupSettings } from '@/components/nup-settings';
 import { InkSaverSettings } from '@/components/ink-saver-settings';
 import { PrintSettings, PrinterInfo, PrintJobSettings } from '@/components/print-settings';
 import { LivePreview } from '@/components/live-preview';
+import { PageGrid } from '@/components/page-grid';
 import { PaymentModal } from '@/components/payment-modal';
 import { NupOptions, imageToPdf, mergePdfs, applyNupLayout } from '@/lib/pdf-processor';
-import { InvertOptions, parsePageRange } from '@/lib/color-inverter';
+import { InvertOptions } from '@/lib/color-inverter';
 import { PDFDocument } from 'pdf-lib';
 import {
   Printer,
@@ -20,6 +21,7 @@ import {
   Shield,
   Layers,
   ArrowRight,
+  Eye,
 } from 'lucide-react';
 
 export default function PrintKioskPage() {
@@ -32,7 +34,12 @@ export default function PrintKioskPage() {
   const [currentSheetIndex, setCurrentSheetIndex] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // 2. N-up Layout state
+  // 2. Page Selection & Per-page Inversion Sets (0-based indices)
+  const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
+  const [invertedPages, setInvertedPages] = useState<Set<number>>(new Set());
+  const [previewTab, setPreviewTab] = useState<'grid' | 'sheet'>('grid');
+
+  // 3. N-up Layout state
   const [nupOptions, setNupOptions] = useState<NupOptions>({
     nup: 1,
     orientation: 'auto',
@@ -42,14 +49,14 @@ export default function PrintKioskPage() {
     paperSize: 'A4',
   });
 
-  // 3. Ink Saver & Invert state
+  // 4. Ink Saver & Invert state
   const [invertOptions, setInvertOptions] = useState<InvertOptions>({
     mode: 'none',
     pageRange: '',
     highContrast: true,
   });
 
-  // 4. Print Job Settings
+  // 5. Print Job Settings
   const [printSettings, setPrintSettings] = useState<PrintJobSettings>({
     printerSlug: 'canonir7105',
     copies: 1,
@@ -58,12 +65,12 @@ export default function PrintKioskPage() {
     customPageRange: '',
   });
 
-  // 5. Printers & Connectivity
+  // 6. Printers & Connectivity
   const [printers, setPrinters] = useState<PrinterInfo[]>([]);
   const [isLoadingPrinters, setIsLoadingPrinters] = useState<boolean>(true);
   const [agentConnected, setAgentConnected] = useState<boolean>(true);
 
-  // 6. UI & Modals state
+  // 7. UI & Modals state
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [printSuccessMessage, setPrintSuccessMessage] = useState<string | null>(null);
@@ -134,9 +141,14 @@ export default function PrintKioskPage() {
     setTransformedPdfBytes(null);
     setTotalOriginalPages(0);
     setTotalSheets(0);
+    setSelectedPages(new Set());
+    setInvertedPages(new Set());
   };
 
-  // Re-process combined and transformed PDF whenever files or N-up settings change
+  // Main Document Name
+  const mainDocName = files.length === 1 ? files[0].name : files.length > 1 ? `${files[0].name.replace(/\.[^/.]+$/, '')}_merged.pdf` : 'Document.pdf';
+
+  // Process files whenever files change
   useEffect(() => {
     let isCancelled = false;
 
@@ -146,6 +158,8 @@ export default function PrintKioskPage() {
         setTransformedPdfBytes(null);
         setTotalOriginalPages(0);
         setTotalSheets(0);
+        setSelectedPages(new Set());
+        setInvertedPages(new Set());
         return;
       }
 
@@ -165,7 +179,6 @@ export default function PrintKioskPage() {
             const convertedPdf = await imageToPdf(buffer, item.type || 'image/jpeg');
             pdfBuffers.push(convertedPdf);
           } else {
-            // Fallback: try treating as PDF
             pdfBuffers.push(buffer);
           }
         }
@@ -173,10 +186,10 @@ export default function PrintKioskPage() {
         if (isCancelled) return;
 
         if (pdfBuffers.length === 0) {
-          throw new Error('No valid PDF or image documents found');
+          throw new Error('No valid documents found');
         }
 
-        // 1. Merge into single source PDF
+        // Merge into single source PDF
         const merged = await mergePdfs(pdfBuffers);
         setOriginalPdfBytes(merged);
 
@@ -184,18 +197,11 @@ export default function PrintKioskPage() {
         const srcPageCount = srcDoc.getPageCount();
         setTotalOriginalPages(srcPageCount);
 
-        // 2. Apply N-in-1 layout imposition with clean Document Title
-        const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(
-          merged,
-          nupOptions,
-          mainDocName
-        );
+        // Select all pages by default
+        const allIndices = new Set<number>();
+        for (let i = 0; i < srcPageCount; i++) allIndices.add(i);
+        setSelectedPages(allIndices);
 
-        if (isCancelled) return;
-
-        setTransformedPdfBytes(nupBytes);
-        setTotalSheets(calculatedSheets);
-        setCurrentSheetIndex(1);
         setIsProcessing(false);
       } catch (err: any) {
         if (!isCancelled) {
@@ -210,10 +216,95 @@ export default function PrintKioskPage() {
     return () => {
       isCancelled = true;
     };
-  }, [files, nupOptions]);
+  }, [files]);
 
-  // Document Name derivation
-  const mainDocName = files.length === 1 ? files[0].name : files.length > 1 ? `${files[0].name.replace(/\.[^/.]+$/, '')}_merged.pdf` : 'Document.pdf';
+  // Re-generate N-in-1 Transformed PDF whenever options or selectedPages change
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function generateTransformedPdf() {
+      if (!originalPdfBytes || totalOriginalPages === 0 || selectedPages.size === 0) {
+        setTransformedPdfBytes(null);
+        setTotalSheets(0);
+        return;
+      }
+
+      try {
+        const sortedSelectedIndices = Array.from(selectedPages).sort((a, b) => a - b);
+        const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(
+          originalPdfBytes,
+          nupOptions,
+          mainDocName,
+          sortedSelectedIndices
+        );
+
+        if (isCancelled) return;
+
+        setTransformedPdfBytes(nupBytes);
+        setTotalSheets(calculatedSheets);
+        setCurrentSheetIndex(1);
+      } catch (err) {
+        console.error('[Processor] Error updating transformed PDF:', err);
+      }
+    }
+
+    generateTransformedPdf();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [originalPdfBytes, totalOriginalPages, selectedPages, nupOptions, mainDocName]);
+
+  // Page Grid Selection Handlers
+  const togglePageSelect = (idx: number) => {
+    setSelectedPages((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const togglePageInvert = (idx: number) => {
+    setInvertedPages((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const selectAllPages = () => {
+    const all = new Set<number>();
+    for (let i = 0; i < totalOriginalPages; i++) all.add(i);
+    setSelectedPages(all);
+  };
+
+  const deselectAllPages = () => {
+    setSelectedPages(new Set());
+  };
+
+  const selectOddPages = () => {
+    const odds = new Set<number>();
+    for (let i = 0; i < totalOriginalPages; i += 2) odds.add(i);
+    setSelectedPages(odds);
+  };
+
+  const selectEvenPages = () => {
+    const evens = new Set<number>();
+    for (let i = 1; i < totalOriginalPages; i += 2) evens.add(i);
+    setSelectedPages(evens);
+  };
+
+  const invertAllPages = () => {
+    const all = new Set<number>();
+    for (let i = 0; i < totalOriginalPages; i++) all.add(i);
+    setInvertedPages(all);
+  };
+
+  const resetInvert = () => {
+    setInvertedPages(new Set());
+  };
 
   // Selected printer details
   const selectedPrinter = printers.find((p) => p.slug === printSettings.printerSlug);
@@ -257,7 +348,7 @@ export default function PrintKioskPage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setPrintSuccessMessage(`Print job successfully dispatched to "${data.printer || selectedPrinter?.displayName}"!`);
+        setPrintSuccessMessage(`Print job "${mainDocName}" successfully dispatched to "${data.printer || selectedPrinter?.displayName}"!`);
         setIsPaymentModalOpen(false);
       } else {
         throw new Error(data.error || 'Failed to dispatch print job to laptop printer');
@@ -271,7 +362,7 @@ export default function PrintKioskPage() {
   };
 
   const handlePrintClick = () => {
-    if (!transformedPdfBytes || files.length === 0) return;
+    if (!transformedPdfBytes || selectedPages.size === 0) return;
     if (freeMode) {
       executePrint();
     } else {
@@ -293,7 +384,7 @@ export default function PrintKioskPage() {
                 Cloud Print Kiosk
               </h1>
               <p className="text-xs text-gray-500">
-                N-in-1 Imposition • Ink-Saver Dark Mode • Production Copier Relay
+                Interactive Page Grid • N-in-1 Imposition • Dark Mode Toner Saver
               </p>
             </div>
           </div>
@@ -353,8 +444,8 @@ export default function PrintKioskPage() {
 
       {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Upload & Controls */}
-        <div className="lg:col-span-7 space-y-6">
+        {/* Left Column: Upload, N-up Settings, and Printer Settings */}
+        <div className="lg:col-span-5 space-y-6">
           {/* 1. Uploader */}
           <Uploader
             files={files}
@@ -367,36 +458,16 @@ export default function PrintKioskPage() {
           <NupSettings
             options={nupOptions}
             onChange={(opts) => setNupOptions((prev) => ({ ...prev, ...opts }))}
-            originalPages={totalOriginalPages}
+            originalPages={selectedPages.size}
           />
 
-          {/* 3. Ink-Saver & Color Inverter */}
-          <InkSaverSettings
-            options={invertOptions}
-            onChange={(opts) => setInvertOptions((prev) => ({ ...prev, ...opts }))}
-            totalPages={totalOriginalPages}
-          />
-
-          {/* 4. Printer & Duplex Settings */}
+          {/* 3. Printer & Duplex Settings */}
           <PrintSettings
             settings={printSettings}
             onChange={(opts) => setPrintSettings((prev) => ({ ...prev, ...opts }))}
             printers={printers}
             isLoadingPrinters={isLoadingPrinters}
             onRefreshPrinters={loadPrinters}
-          />
-        </div>
-
-        {/* Right Column: Live Sheet Preview & Checkout Card */}
-        <div className="lg:col-span-5 space-y-6">
-          {/* Live Canvas Preview */}
-          <LivePreview
-            pdfBytes={transformedPdfBytes}
-            currentPage={currentSheetIndex}
-            totalPages={totalSheets}
-            onPageChange={setCurrentSheetIndex}
-            invertMode={invertOptions.mode}
-            isProcessing={isProcessing}
           />
 
           {/* Price & Summary Checkout Card */}
@@ -410,8 +481,8 @@ export default function PrintKioskPage() {
 
             <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
               <div className="flex justify-between">
-                <span>Original Pages:</span>
-                <span className="font-medium text-gray-800 dark:text-gray-200">{totalOriginalPages} pages</span>
+                <span>Selected Pages:</span>
+                <span className="font-medium text-gray-800 dark:text-gray-200 font-semibold">{selectedPages.size} of {totalOriginalPages} pages</span>
               </div>
               <div className="flex justify-between">
                 <span>Layout Imposition:</span>
@@ -445,7 +516,7 @@ export default function PrintKioskPage() {
             <button
               type="button"
               onClick={handlePrintClick}
-              disabled={files.length === 0 || isProcessing || isPrinting}
+              disabled={files.length === 0 || selectedPages.size === 0 || isProcessing || isPrinting}
               className="w-full py-4 px-6 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-base rounded-2xl shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2.5 transition-all disabled:opacity-50 disabled:shadow-none"
             >
               {isPrinting ? (
@@ -467,6 +538,66 @@ export default function PrintKioskPage() {
               )}
             </button>
           </div>
+        </div>
+
+        {/* Right Column: Interactive Page Grid Gallery & Full Sheet Viewer Tabs */}
+        <div className="lg:col-span-7 space-y-4">
+          {/* Tab Navigation */}
+          <div className="flex items-center justify-between bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-2 shadow-sm">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewTab('grid')}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
+                  previewTab === 'grid'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                <Layers className="w-4 h-4" />
+                <span>Page Grid & Selection ({selectedPages.size})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPreviewTab('sheet')}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
+                  previewTab === 'sheet'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                <Eye className="w-4 h-4" />
+                <span>N-in-1 Sheet View ({totalSheets} {totalSheets === 1 ? 'Sheet' : 'Sheets'})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Tab View */}
+          {previewTab === 'grid' ? (
+            <PageGrid
+              pdfBytes={originalPdfBytes}
+              selectedPages={selectedPages}
+              invertedPages={invertedPages}
+              onToggleSelect={togglePageSelect}
+              onToggleInvert={togglePageInvert}
+              onSelectAll={selectAllPages}
+              onDeselectAll={deselectAllPages}
+              onInvertAll={invertAllPages}
+              onResetInvert={resetInvert}
+              onSelectOdd={selectOddPages}
+              onSelectEven={selectEvenPages}
+            />
+          ) : (
+            <LivePreview
+              pdfBytes={transformedPdfBytes}
+              currentPage={currentSheetIndex}
+              totalPages={totalSheets}
+              onPageChange={setCurrentSheetIndex}
+              invertMode={invertOptions.mode}
+              isProcessing={isProcessing}
+            />
+          )}
         </div>
       </div>
 

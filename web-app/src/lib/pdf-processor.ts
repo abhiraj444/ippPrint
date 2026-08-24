@@ -63,19 +63,34 @@ export async function mergePdfs(pdfBuffers: Uint8Array[]): Promise<Uint8Array> {
 export async function applyNupLayout(
   sourcePdfBytes: Uint8Array,
   options: NupOptions,
-  documentTitle?: string
+  documentTitle?: string,
+  selectedPageIndices?: number[]
 ): Promise<{ pdfBytes: Uint8Array; totalSheets: number }> {
   const { nup = 1, orientation = 'auto', drawBorders = true, marginPt = 20, gutterPt = 10, paperSize = 'A4' } = options;
 
+  const srcDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
+  const allSrcPages = srcDoc.getPages();
+  
+  // Filter pages if selectedPageIndices is specified
+  const filteredIndices = selectedPageIndices && selectedPageIndices.length > 0
+    ? selectedPageIndices.filter(idx => idx >= 0 && idx < allSrcPages.length)
+    : srcDoc.getPageIndices();
+
+  if (filteredIndices.length === 0) {
+    throw new Error('No pages selected to print');
+  }
+
+  // If nup === 1, copy only selected pages
   if (nup === 1) {
-    const srcDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
+    const singleDoc = await PDFDocument.create();
     if (documentTitle) {
-      srcDoc.setTitle(documentTitle);
-      srcDoc.setSubject(documentTitle);
-      srcDoc.setProducer('Cloud Print Kiosk');
-      return { pdfBytes: await srcDoc.save(), totalSheets: srcDoc.getPageCount() };
+      singleDoc.setTitle(documentTitle);
+      singleDoc.setSubject(documentTitle);
+      singleDoc.setProducer('Cloud Print Kiosk');
     }
-    return { pdfBytes: sourcePdfBytes, totalSheets: srcDoc.getPageCount() };
+    const copiedPages = await singleDoc.copyPages(srcDoc, filteredIndices);
+    copiedPages.forEach(p => singleDoc.addPage(p));
+    return { pdfBytes: await singleDoc.save(), totalSheets: singleDoc.getPageCount() };
   }
 
   let cols = 1;
@@ -90,14 +105,6 @@ export async function applyNupLayout(
     cols = options.cols;
   }
 
-  const srcDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
-  const srcPages = srcDoc.getPages();
-  const totalSrcPages = srcPages.length;
-
-  if (totalSrcPages === 0) {
-    throw new Error('PDF has no pages');
-  }
-
   const outDoc = await PDFDocument.create();
   if (documentTitle) {
     outDoc.setTitle(documentTitle);
@@ -107,7 +114,6 @@ export async function applyNupLayout(
 
   const [baseW, baseH] = PAPER_DIMENSIONS[paperSize] || PAPER_DIMENSIONS.A4;
 
-  // Determine Master Sheet Dimensions based on grid aspect
   let sheetW = baseW;
   let sheetH = baseH;
 
@@ -120,7 +126,7 @@ export async function applyNupLayout(
   }
 
   const slotsPerPage = rows * cols;
-  const totalSheets = Math.ceil(totalSrcPages / slotsPerPage);
+  const totalSheets = Math.ceil(filteredIndices.length / slotsPerPage);
 
   const usableW = sheetW - 2 * marginPt - (cols - 1) * gutterPt;
   const usableH = sheetH - 2 * marginPt - (rows - 1) * gutterPt;
@@ -132,22 +138,20 @@ export async function applyNupLayout(
     const outPage = outDoc.addPage([sheetW, sheetH]);
 
     for (let slotIdx = 0; slotIdx < slotsPerPage; slotIdx++) {
-      const srcIdx = sheetIdx * slotsPerPage + slotIdx;
-      if (srcIdx >= totalSrcPages) break;
+      const targetItemIdx = sheetIdx * slotsPerPage + slotIdx;
+      if (targetItemIdx >= filteredIndices.length) break;
 
-      const [embeddedPage] = await outDoc.embedPages([srcPages[srcIdx]]);
+      const srcPageIdx = filteredIndices[targetItemIdx];
+      const [embeddedPage] = await outDoc.embedPages([allSrcPages[srcPageIdx]]);
       const origW = embeddedPage.width;
       const origH = embeddedPage.height;
 
-      // Slot grid coordinate (row 0 is top, col 0 is left)
       const r = Math.floor(slotIdx / cols);
       const c = slotIdx % cols;
 
       const cellX = marginPt + c * (cellW + gutterPt);
-      // In PDF coordinates, Y starts from bottom-left
       const cellY = sheetH - marginPt - (r + 1) * cellH - r * gutterPt;
 
-      // Calculate scale to fit cell while preserving aspect ratio
       const scaleW = cellW / origW;
       const scaleH = cellH / origH;
       const scale = Math.min(scaleW, scaleH);
@@ -155,7 +159,6 @@ export async function applyNupLayout(
       const fittedW = origW * scale;
       const fittedH = origH * scale;
 
-      // Center the page inside the cell
       const drawX = cellX + (cellW - fittedW) / 2;
       const drawY = cellY + (cellH - fittedH) / 2;
 
@@ -166,7 +169,6 @@ export async function applyNupLayout(
         height: fittedH,
       });
 
-      // Optional subtle outline border
       if (drawBorders) {
         outPage.drawRectangle({
           x: drawX,
