@@ -194,8 +194,8 @@ export async function applyNupLayout(
   const slotsPerPage = rows * cols;
   const totalSheets = Math.ceil(filteredIndices.length / slotsPerPage);
 
-  // Render scale factor for crisp 300 DPI print quality
-  const renderScale = 2.0;
+  // Render scale factor for fast 150 DPI print quality (150 DPI / 72 PT = 2.083)
+  const renderScale = 150 / 72;
 
   const usableW = (sheetW - 2 * marginPt - (cols - 1) * gutterPt) * renderScale;
   const usableH = (sheetH - 2 * marginPt - (rows - 1) * gutterPt) * renderScale;
@@ -265,8 +265,8 @@ export async function applyNupLayout(
       }
     }
 
-    // Convert sheet canvas to JPEG image bytes
-    const sheetDataUrl = sheetCanvas.toDataURL('image/jpeg', 0.95);
+    // Convert sheet canvas to JPEG image bytes at fast 150 DPI
+    const sheetDataUrl = sheetCanvas.toDataURL('image/jpeg', 0.88);
     const base64Data = sheetDataUrl.split(',')[1];
     const binaryStr = atob(base64Data);
     const imageBytes = new Uint8Array(binaryStr.length);
