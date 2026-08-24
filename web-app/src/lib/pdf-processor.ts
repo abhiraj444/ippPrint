@@ -1,4 +1,4 @@
-﻿import { PDFDocument, rgb, degrees, PageSizes } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, PageSizes } from 'pdf-lib';
 
 export interface NupOptions {
   nup: number; // 1, 2, 3, 4, 6, 9
@@ -62,12 +62,19 @@ export async function mergePdfs(pdfBuffers: Uint8Array[]): Promise<Uint8Array> {
  */
 export async function applyNupLayout(
   sourcePdfBytes: Uint8Array,
-  options: NupOptions
+  options: NupOptions,
+  documentTitle?: string
 ): Promise<{ pdfBytes: Uint8Array; totalSheets: number }> {
   const { nup = 1, orientation = 'auto', drawBorders = true, marginPt = 20, gutterPt = 10, paperSize = 'A4' } = options;
 
   if (nup === 1) {
     const srcDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
+    if (documentTitle) {
+      srcDoc.setTitle(documentTitle);
+      srcDoc.setSubject(documentTitle);
+      srcDoc.setProducer('Cloud Print Kiosk');
+      return { pdfBytes: await srcDoc.save(), totalSheets: srcDoc.getPageCount() };
+    }
     return { pdfBytes: sourcePdfBytes, totalSheets: srcDoc.getPageCount() };
   }
 
@@ -92,6 +99,12 @@ export async function applyNupLayout(
   }
 
   const outDoc = await PDFDocument.create();
+  if (documentTitle) {
+    outDoc.setTitle(documentTitle);
+    outDoc.setSubject(documentTitle);
+    outDoc.setProducer('Cloud Print Kiosk');
+  }
+
   const [baseW, baseH] = PAPER_DIMENSIONS[paperSize] || PAPER_DIMENSIONS.A4;
 
   // Determine Master Sheet Dimensions based on grid aspect

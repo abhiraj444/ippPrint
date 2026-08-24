@@ -156,15 +156,25 @@ export default function PrintKioskPage() {
 
         for (const item of files) {
           const buffer = new Uint8Array(await item.file.arrayBuffer());
-          if (item.type.includes('pdf')) {
+          const isPdf = item.type.includes('pdf') || item.name.toLowerCase().endsWith('.pdf');
+          const isImage = item.type.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif)$/i.test(item.name);
+
+          if (isPdf) {
             pdfBuffers.push(buffer);
-          } else if (item.type.startsWith('image/')) {
-            const convertedPdf = await imageToPdf(buffer, item.type);
+          } else if (isImage) {
+            const convertedPdf = await imageToPdf(buffer, item.type || 'image/jpeg');
             pdfBuffers.push(convertedPdf);
+          } else {
+            // Fallback: try treating as PDF
+            pdfBuffers.push(buffer);
           }
         }
 
         if (isCancelled) return;
+
+        if (pdfBuffers.length === 0) {
+          throw new Error('No valid PDF or image documents found');
+        }
 
         // 1. Merge into single source PDF
         const merged = await mergePdfs(pdfBuffers);
@@ -174,8 +184,12 @@ export default function PrintKioskPage() {
         const srcPageCount = srcDoc.getPageCount();
         setTotalOriginalPages(srcPageCount);
 
-        // 2. Apply N-in-1 layout imposition
-        const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(merged, nupOptions);
+        // 2. Apply N-in-1 layout imposition with clean Document Title
+        const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(
+          merged,
+          nupOptions,
+          mainDocName
+        );
 
         if (isCancelled) return;
 

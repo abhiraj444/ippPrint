@@ -152,33 +152,14 @@ export async function printDocument(
     if (platform === 'win32') {
       console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Windows with clean document title...`);
       
-      const gs = findGhostscript();
-      let spooled = false;
-
-      // 1. Try direct Ghostscript Windows print device (sets DOCINFO.lpszDocName explicitly)
-      if (gs) {
-        try {
-          console.log(`[printer] Spooling via Ghostscript mswinpr2 with DocumentName "${cleanName}"...`);
-          const gsCmd = `"${gs}" -dNOPAUSE -dBATCH -dQUIET -sDEVICE=mswinpr2 -sOutputFile="%printer%${printerName}" -c "mark /UserSettings <</DocumentName (${cleanName})>> (mswinpr2) finddevice putdeviceprops setdevice" -f "${fileToPrint}"`;
-          await execAsync(gsCmd, { windowsHide: true });
-          spooled = true;
-          console.log(`[printer] Ghostscript direct spooling completed for "${cleanName}"`);
-        } catch (gsErr) {
-          console.warn(`[printer] Ghostscript direct spooling notice:`, gsErr);
-        }
-      }
-
-      // 2. Fallback to SumatraPDF if needed
-      if (!spooled) {
-        const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
-        if (fsSync.existsSync(sumatraExe)) {
-          await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
-            cwd: jobDir,
-            windowsHide: true
-          });
-        } else {
-          await pdfToPrinter.print(fileToPrint, { printer: printerName });
-        }
+      const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
+      if (fsSync.existsSync(sumatraExe)) {
+        await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
+          cwd: jobDir,
+          windowsHide: true
+        });
+      } else {
+        await pdfToPrinter.print(fileToPrint, { printer: printerName });
       }
 
       console.log(`[printer] Successfully sent "${fileName}" (job ${jobId}) to printer "${printerName}"`);

@@ -21,6 +21,10 @@ export function LivePreview({
   invertMode,
   isProcessing,
 }: LivePreviewProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [scale, setScale] = useState<number>(0.85);
+  const [isRendering, setIsRendering] = useState<boolean>(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [useFallbackViewer, setUseFallbackViewer] = useState<boolean>(false);
 
@@ -32,7 +36,7 @@ export function LivePreview({
       return;
     }
 
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
     const url = URL.createObjectURL(blob);
     setPdfObjectUrl(url);
     setUseFallbackViewer(false);
