@@ -10,7 +10,7 @@ try {
   
   $pd = New-Object System.Drawing.Printing.PrintDocument
   $pd.PrinterSettings.PrinterName = $PrinterName
-  $pd.PrinterSettings.Copies = [short]$Copies
+  $pd.PrinterSettings.Copies = [int16]$Copies
   $pd.DocumentName = $DocumentName
 
   $script:pageIndex = 0
@@ -35,7 +35,7 @@ try {
 
   $pd.Print()
   $pd.Dispose()
-  Write-Host "Successfully spooled $DocumentName to $PrinterName"
+  Write-Host "SUCCESS: Spooled $DocumentName to $PrinterName"
 } catch {
   Write-Error $_
   exit 1
