@@ -1,8 +1,0 @@
-{
-  "/_not-found/page": "app/_not-found/page.js",
-  "/api/payment/verify/route": "app/api/payment/verify/route.js",
-  "/api/payment/create-order/route": "app/api/payment/create-order/route.js",
-  "/api/print/route": "app/api/print/route.js",
-  "/page": "app/page.js",
-  "/api/printers/route": "app/api/printers/route.js"
-}

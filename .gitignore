@@ -2,6 +2,11 @@
 node_modules/
 package-lock.json
 
+# Next.js build
+.next/
+web-app/.next/
+out/
+
 # Build outputs
 dist/
 .wrangler/
@@ -25,3 +30,4 @@ test/*.bin
 test/out.pdf
 test/test8.pdf
 test/test_raster.pdf
+test/title_test.pdf
