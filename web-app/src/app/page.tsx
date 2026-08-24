@@ -23,7 +23,12 @@ import {
   Plus,
   Trash2,
   X,
-  FileCheck,
+  UploadCloud,
+  Check,
+  ChevronDown,
+  LayoutGrid,
+  SunMoon,
+  Files,
 } from 'lucide-react';
 
 export interface DocumentItem {
@@ -36,6 +41,7 @@ export interface DocumentItem {
   selectedPages: Set<number>;
   invertedPages: Set<number>;
   nupOptions: NupOptions;
+  includedInPrint: boolean;
 }
 
 const DEFAULT_NUP: NupOptions = {
@@ -54,7 +60,7 @@ export default function PrintKioskPage() {
   const [isProcessingFiles, setIsProcessingFiles] = useState<boolean>(false);
   const [previewTab, setPreviewTab] = useState<'grid' | 'sheet'>('grid');
   const [currentSheetIndex, setCurrentSheetIndex] = useState<number>(1);
-  const [printScope, setPrintScope] = useState<'current' | 'all'>('current');
+  const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
 
   // 2. Global Print Job Settings
   const [printSettings, setPrintSettings] = useState<PrintJobSettings>({
@@ -70,9 +76,10 @@ export default function PrintKioskPage() {
   const [isLoadingPrinters, setIsLoadingPrinters] = useState<boolean>(true);
   const [agentConnected, setAgentConnected] = useState<boolean>(true);
 
-  // 4. UI & Modals state
+  // 4. UI, Printing, & Modals state
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
+  const [printProgressText, setPrintProgressText] = useState<string | null>(null);
   const [printSuccessMessage, setPrintSuccessMessage] = useState<string | null>(null);
   const [printErrorMessage, setPrintErrorMessage] = useState<string | null>(null);
   const [freeMode, setFreeMode] = useState<boolean>(false);
@@ -121,7 +128,7 @@ export default function PrintKioskPage() {
     return () => clearInterval(interval);
   }, [loadPrinters]);
 
-  // Handle uploaded files (each as a separate document)
+  // Handle uploaded files (all processed and queued together)
   const handleFilesAdded = async (fileList: FileList | File[]) => {
     if (!fileList || fileList.length === 0) return;
 
@@ -131,6 +138,7 @@ export default function PrintKioskPage() {
       setPrintSuccessMessage(null);
 
       const newDocs: DocumentItem[] = [];
+      const timestamp = Date.now();
 
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
@@ -154,7 +162,7 @@ export default function PrintKioskPage() {
         for (let p = 0; p < pageCount; p++) allPages.add(p);
 
         newDocs.push({
-          id: `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          id: `${timestamp}-${i}-${Math.random().toString(36).substring(2, 8)}`,
           name: file.name,
           size: file.size,
           type: file.type,
@@ -163,6 +171,7 @@ export default function PrintKioskPage() {
           selectedPages: allPages,
           invertedPages: new Set<number>(),
           nupOptions: { ...DEFAULT_NUP },
+          includedInPrint: true,
         });
       }
 
@@ -194,6 +203,13 @@ export default function PrintKioskPage() {
       }
       return next;
     });
+  };
+
+  const handleToggleDocIncluded = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDocuments((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, includedInPrint: !d.includedInPrint } : d))
+    );
   };
 
   const handleClearAll = () => {
@@ -277,7 +293,17 @@ export default function PrintKioskPage() {
     updateActiveDoc((doc) => ({ ...doc, nupOptions: { ...doc.nupOptions, ...newNup } }));
   };
 
-  // Sheet calculation
+  // Batch N-up update for all documents
+  const applyNupToAll = (nupVal: number) => {
+    setDocuments((prev) =>
+      prev.map((d) => ({
+        ...d,
+        nupOptions: { ...d.nupOptions, nup: nupVal },
+      }))
+    );
+  };
+
+  // Sheet calculation for any doc
   const getDocSheets = (doc: DocumentItem) => {
     const nup = doc.nupOptions.nup;
     const slots = nup === 2 ? 2 : nup === 3 ? 3 : nup === 4 ? 4 : nup === 6 ? 6 : nup === 9 ? 9 : 1;
@@ -286,9 +312,10 @@ export default function PrintKioskPage() {
 
   const activeDocSheets = activeDoc ? getDocSheets(activeDoc) : 0;
 
-  // Total sheets across all selected documents
-  const docsToPrint = printScope === 'all' ? documents : activeDoc ? [activeDoc] : [];
+  // Documents queued for print (all included documents)
+  const docsToPrint = documents.filter((d) => d.includedInPrint && d.selectedPages.size > 0);
   const totalPrintSheets = docsToPrint.reduce((acc, d) => acc + getDocSheets(d) * printSettings.copies, 0);
+  const totalPagesSelected = docsToPrint.reduce((acc, d) => acc + d.selectedPages.size, 0);
 
   // Selected printer details & pricing
   const selectedPrinter = printers.find((p) => p.slug === printSettings.printerSlug);
@@ -297,7 +324,7 @@ export default function PrintKioskPage() {
   const ratePerSheet = isColorPrinter ? 10.0 : isDuplexMode ? 3.0 : 2.0;
   const totalAmount = Math.max(1, Math.round(totalPrintSheets * ratePerSheet));
 
-  // Dispatch Print Execution
+  // Dispatch Sequential Print Execution
   const executePrint = async () => {
     if (docsToPrint.length === 0) return;
 
@@ -309,13 +336,14 @@ export default function PrintKioskPage() {
       const RELAY_WORKER_URL = 'https://relay-worker.abhinavip.workers.dev';
       const spooledDocNames: string[] = [];
 
-      for (const doc of docsToPrint) {
-        if (doc.selectedPages.size === 0) continue;
+      for (let i = 0; i < docsToPrint.length; i++) {
+        const doc = docsToPrint[i];
+        setPrintProgressText(`Printing (${i + 1}/${docsToPrint.length}): "${doc.name}"...`);
 
         const sortedSelected = Array.from(doc.selectedPages).sort((a, b) => a - b);
         const sortedInverted = Array.from(doc.invertedPages).sort((a, b) => a - b);
 
-        // Generate print document for this specific file with its exact filename
+        // Generate print document for this specific file with its exact clean filename
         const { pdfBytes: printBytes } = await applyNupLayout(
           doc.pdfBytes,
           doc.nupOptions,
@@ -326,8 +354,8 @@ export default function PrintKioskPage() {
 
         let binary = '';
         const len = printBytes.byteLength;
-        for (let i = 0; i < len; i++) {
-          binary += String.fromCharCode(printBytes[i]);
+        for (let j = 0; j < len; j++) {
+          binary += String.fromCharCode(printBytes[j]);
         }
         const pdfBase64 = btoa(binary);
 
@@ -373,7 +401,7 @@ export default function PrintKioskPage() {
       setPrintSuccessMessage(
         spooledDocNames.length === 1
           ? `Print job "${spooledDocNames[0]}" successfully dispatched to "${selectedPrinter?.displayName || 'Printer'}"!`
-          : `${spooledDocNames.length} separate documents (${spooledDocNames.join(', ')}) successfully dispatched to "${selectedPrinter?.displayName || 'Printer'}"!`
+          : `All ${spooledDocNames.length} documents (${spooledDocNames.join(', ')}) successfully dispatched to "${selectedPrinter?.displayName || 'Printer'}"!`
       );
       setIsPaymentModalOpen(false);
     } catch (err: any) {
@@ -381,6 +409,7 @@ export default function PrintKioskPage() {
       setPrintErrorMessage(err.message || 'Printing failed. Check laptop agent.');
     } finally {
       setIsPrinting(false);
+      setPrintProgressText(null);
     }
   };
 
@@ -393,8 +422,13 @@ export default function PrintKioskPage() {
     }
   };
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 pb-28">
+    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 pb-32">
       {/* Top Navbar */}
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center gap-3">
@@ -406,7 +440,7 @@ export default function PrintKioskPage() {
               Cloud Print Kiosk
             </h1>
             <p className="text-xs text-gray-500 font-medium">
-              Multi-Document Queue • Per-Page Toner Saver • N-in-1 Imposition
+              Multi-Document Queue • All-in-One Checkout • Exact File Names
             </p>
           </div>
         </div>
@@ -474,7 +508,7 @@ export default function PrintKioskPage() {
         </div>
       )}
 
-      {/* Hidden File Input for uploading */}
+      {/* Hidden File Input for uploading multiple files */}
       <input
         ref={fileInputRef}
         type="file"
@@ -487,236 +521,329 @@ export default function PrintKioskPage() {
         className="hidden"
       />
 
-      {/* Document Queue Switcher Bar */}
-      {documents.length > 0 && (
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          {/* Document Tabs */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-thin">
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2">
-              Queue ({documents.length}):
-            </span>
+      {/* Drag & Drop Multi-file Upload Bar */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDraggingOver(true);
+        }}
+        onDragLeave={() => setIsDraggingOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDraggingOver(false);
+          if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files);
+        }}
+        onClick={() => fileInputRef.current?.click()}
+        className={`border-2 border-dashed rounded-3xl p-6 text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm ${
+          isDraggingOver
+            ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 ring-4 ring-indigo-600/20'
+            : 'border-gray-200 dark:border-gray-800 hover:border-indigo-400 bg-white dark:bg-gray-900'
+        }`}
+      >
+        <div className="flex items-center gap-4 text-left">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
+            <UploadCloud className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100">
+              {documents.length === 0
+                ? 'Upload Documents to Print (Select Multiple PDFs / Images)'
+                : 'Add More Documents to Print Queue'}
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Drag & drop multiple files here, or click to select from your device
+            </p>
+          </div>
+        </div>
 
-            {documents.map((doc) => {
-              const isActive = doc.id === activeDoc?.id;
-              return (
+        <button
+          type="button"
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-1.5 flex-shrink-0"
+        >
+          <Plus className="w-4 h-4" />
+          <span>{documents.length === 0 ? 'Select Files' : 'Add Files'}</span>
+        </button>
+      </div>
+
+      {/* Main Multi-Document Content */}
+      {documents.length > 0 && (
+        <div className="space-y-6">
+          {/* Section 1: All Uploaded Documents Cards Grid */}
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2.5">
+                <Files className="w-5 h-5 text-indigo-600" />
+                <h2 className="font-bold text-gray-900 dark:text-gray-100 text-base">
+                  Uploaded Documents ({documents.length} {documents.length === 1 ? 'file' : 'files'})
+                </h2>
+                <span className="text-xs text-gray-400 font-medium">
+                  • {totalPagesSelected} pages ({totalPrintSheets} physical sheets)
+                </span>
+              </div>
+
+              {/* Batch Presets for all files */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-400 font-semibold">Set Layout for All:</span>
                 <button
-                  key={doc.id}
                   type="button"
-                  onClick={() => {
-                    setActiveDocId(doc.id);
-                    setCurrentSheetIndex(1);
-                  }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border flex-shrink-0 ${
-                    isActive
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/20 ring-2 ring-indigo-600/30'
-                      : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-100'
-                  }`}
+                  onClick={() => applyNupToAll(1)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
                 >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span className="max-w-[150px] truncate">{doc.name}</span>
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                      isActive ? 'bg-indigo-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  1 in 1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyNupToAll(2)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  2 in 1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyNupToAll(4)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  4 in 1
+                </button>
+                <span className="text-gray-300 dark:text-gray-700">|</span>
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+
+            {/* Document Cards List */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {documents.map((doc, idx) => {
+                const isActive = doc.id === activeDoc?.id;
+                const docSheets = getDocSheets(doc);
+
+                return (
+                  <div
+                    key={doc.id}
+                    onClick={() => {
+                      setActiveDocId(doc.id);
+                      setCurrentSheetIndex(1);
+                    }}
+                    className={`relative rounded-2xl border-2 p-4 transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+                      isActive
+                        ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-md ring-2 ring-indigo-600/20'
+                        : 'border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40 hover:border-indigo-300'
                     }`}
                   >
-                    {doc.selectedPages.size} / {doc.pageCount} pgs
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => handleRemoveDoc(doc.id, e)}
-                    className="hover:opacity-75 p-0.5"
-                    title="Remove file"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </button>
-              );
-            })}
+                    {/* Top Row: File Name & Checkbox */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleDocIncluded(doc.id, e)}
+                          className={`w-5 h-5 rounded-md flex items-center justify-center border mt-0.5 transition-colors flex-shrink-0 ${
+                            doc.includedInPrint
+                              ? 'bg-indigo-600 border-indigo-600 text-white'
+                              : 'border-gray-400 bg-white dark:bg-gray-800'
+                          }`}
+                          title={doc.includedInPrint ? 'Included in print' : 'Excluded from print'}
+                        >
+                          {doc.includedInPrint && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        </button>
+                        <div className="min-w-0">
+                          <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate" title={doc.name}>
+                            {idx + 1}. {doc.name}
+                          </h4>
+                          <p className="text-xs text-gray-500">
+                            {formatFileSize(doc.size)} • {doc.selectedPages.size} of {doc.pageCount} pgs
+                          </p>
+                        </div>
+                      </div>
 
-            {/* Add More Files Button */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-2 rounded-xl text-xs font-semibold border border-dashed border-gray-300 dark:border-gray-700 hover:border-indigo-500 hover:text-indigo-600 text-gray-500 transition-colors flex items-center gap-1.5 flex-shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add PDF / Image</span>
-            </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleRemoveDoc(doc.id, e)}
+                        className="text-gray-400 hover:text-red-500 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 flex-shrink-0"
+                        title="Remove document"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Middle Row: N-in-1 layout pill for this file */}
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700/60 text-xs">
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 4].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDocuments((prev) =>
+                                prev.map((d) => (d.id === doc.id ? { ...d, nupOptions: { ...d.nupOptions, nup: n } } : d))
+                              );
+                            }}
+                            className={`px-2 py-0.5 rounded-md font-semibold transition-colors ${
+                              doc.nupOptions.nup === n
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300'
+                            }`}
+                          >
+                            {n}-in-1
+                          </button>
+                        ))}
+                      </div>
+
+                      <span className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-950 px-2 py-0.5 rounded-full">
+                        {docSheets} {docSheets === 1 ? 'sheet' : 'sheets'}
+                      </span>
+                    </div>
+
+                    {/* Bottom Status / Inspect Active Button */}
+                    <div className="flex items-center justify-between text-xs">
+                      <span
+                        className={`font-semibold ${
+                          isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'
+                        }`}
+                      >
+                        {isActive ? '● Currently Inspecting' : 'Click to inspect & edit pages'}
+                      </span>
+
+                      {doc.invertedPages.size > 0 && (
+                        <span className="text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-bold">
+                          {doc.invertedPages.size} Inverted
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Clear Queue */}
-          <button
-            type="button"
-            onClick={handleClearAll}
-            className="text-xs font-semibold text-red-500 hover:text-red-600 px-3 py-1 flex items-center gap-1.5 flex-shrink-0 self-end sm:self-auto"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear Queue</span>
-          </button>
+          {/* Section 2: Active Document Detailed Inspector & Printer Settings */}
+          {activeDoc && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Main Stage (Left 8 Cols): Interactive Viewer for Active Document */}
+              <div className="lg:col-span-8 space-y-4">
+                {/* Tab View Switcher */}
+                <div className="flex items-center justify-between bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-2 shadow-sm">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('grid')}
+                      className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
+                        previewTab === 'grid'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Layers className="w-4 h-4" />
+                      <span>Page Grid ({activeDoc.selectedPages.size} / {activeDoc.pageCount})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPreviewTab('sheet')}
+                      className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
+                        previewTab === 'sheet'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>N-in-1 Sheet View ({activeDocSheets} {activeDocSheets === 1 ? 'Sheet' : 'Sheets'})</span>
+                    </button>
+                  </div>
+
+                  <span className="text-xs font-bold text-gray-500 hidden sm:inline truncate max-w-[250px] px-2">
+                    Inspecting: {activeDoc.name}
+                  </span>
+                </div>
+
+                {/* Viewer Content */}
+                {previewTab === 'grid' ? (
+                  <PageGrid
+                    pdfBytes={activeDoc.pdfBytes}
+                    selectedPages={activeDoc.selectedPages}
+                    invertedPages={activeDoc.invertedPages}
+                    onToggleSelect={togglePageSelect}
+                    onToggleInvert={togglePageInvert}
+                    onSelectAll={selectAllPages}
+                    onDeselectAll={deselectAllPages}
+                    onInvertAll={invertAllPages}
+                    onResetInvert={resetInvert}
+                    onSelectOdd={selectOddPages}
+                    onSelectEven={selectEvenPages}
+                  />
+                ) : (
+                  <LivePreview
+                    sourcePdfBytes={activeDoc.pdfBytes}
+                    nupOptions={activeDoc.nupOptions}
+                    selectedPages={activeDoc.selectedPages}
+                    invertedPages={activeDoc.invertedPages}
+                    currentSheet={currentSheetIndex}
+                    totalSheets={activeDocSheets}
+                    onPageChange={setCurrentSheetIndex}
+                  />
+                )}
+              </div>
+
+              {/* Configuration & Output Settings (Right 4 Cols) */}
+              <div className="lg:col-span-4 space-y-6">
+                {/* N-in-1 Imposition Settings for active doc */}
+                <NupSettings
+                  options={activeDoc.nupOptions}
+                  onChange={updateActiveNup}
+                  originalPages={activeDoc.selectedPages.size}
+                />
+
+                {/* Printer & Output Settings */}
+                <PrintSettings
+                  settings={printSettings}
+                  onChange={(opts) => setPrintSettings((prev) => ({ ...prev, ...opts }))}
+                  printers={printers}
+                  isLoadingPrinters={isLoadingPrinters}
+                  onRefreshPrinters={() => loadPrinters(true)}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Main Grid / PDF Viewer Hero Section */}
-      {documents.length === 0 ? (
-        /* Empty State: Prominent Drag & Drop Uploader */
-        <div className="bg-white dark:bg-gray-900 border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-3xl p-12 text-center shadow-sm space-y-4">
-          <div className="w-16 h-16 rounded-3xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto shadow-inner">
-            <FileCheck className="w-8 h-8" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              Upload Documents to Print
-            </h2>
-            <p className="text-sm text-gray-500 max-w-md mx-auto mt-1">
-              Drag and drop multiple PDFs or images. Each file will be queued separately with its own real file name.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-sm rounded-2xl shadow-lg shadow-indigo-600/30 inline-flex items-center gap-2 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Browse Files from Device</span>
-          </button>
-        </div>
-      ) : activeDoc ? (
-        /* Hero PDF Stage & Controls */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Main Stage (Left 8 Cols): Interactive Viewer */}
-          <div className="lg:col-span-8 space-y-4">
-            {/* Tab View Switcher */}
-            <div className="flex items-center justify-between bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-2 shadow-sm">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPreviewTab('grid')}
-                  className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
-                    previewTab === 'grid'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <Layers className="w-4 h-4" />
-                  <span>Page Grid ({activeDoc.selectedPages.size} / {activeDoc.pageCount})</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPreviewTab('sheet')}
-                  className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
-                    previewTab === 'sheet'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <Eye className="w-4 h-4" />
-                  <span>N-in-1 Sheet View ({activeDocSheets} {activeDocSheets === 1 ? 'Sheet' : 'Sheets'})</span>
-                </button>
-              </div>
-
-              <span className="text-xs font-bold text-gray-500 hidden sm:inline truncate max-w-[200px] px-2">
-                Active: {activeDoc.name}
-              </span>
-            </div>
-
-            {/* Viewer Content */}
-            {previewTab === 'grid' ? (
-              <PageGrid
-                pdfBytes={activeDoc.pdfBytes}
-                selectedPages={activeDoc.selectedPages}
-                invertedPages={activeDoc.invertedPages}
-                onToggleSelect={togglePageSelect}
-                onToggleInvert={togglePageInvert}
-                onSelectAll={selectAllPages}
-                onDeselectAll={deselectAllPages}
-                onInvertAll={invertAllPages}
-                onResetInvert={resetInvert}
-                onSelectOdd={selectOddPages}
-                onSelectEven={selectEvenPages}
-              />
-            ) : (
-              <LivePreview
-                sourcePdfBytes={activeDoc.pdfBytes}
-                nupOptions={activeDoc.nupOptions}
-                selectedPages={activeDoc.selectedPages}
-                invertedPages={activeDoc.invertedPages}
-                currentSheet={currentSheetIndex}
-                totalSheets={activeDocSheets}
-                onPageChange={setCurrentSheetIndex}
-              />
-            )}
-          </div>
-
-          {/* Configuration & Output Settings (Right 4 Cols) */}
-          <div className="lg:col-span-4 space-y-6">
-            {/* N-in-1 Imposition Settings */}
-            <NupSettings
-              options={activeDoc.nupOptions}
-              onChange={updateActiveNup}
-              originalPages={activeDoc.selectedPages.size}
-            />
-
-            {/* Printer & Output Settings */}
-            <PrintSettings
-              settings={printSettings}
-              onChange={(opts) => setPrintSettings((prev) => ({ ...prev, ...opts }))}
-              printers={printers}
-              isLoadingPrinters={isLoadingPrinters}
-              onRefreshPrinters={() => loadPrinters(true)}
-            />
-          </div>
-        </div>
-      ) : null}
-
-      {/* Floating Bottom Sticky Action Bar */}
+      {/* Floating Bottom Sticky Action Bar (Calculates Total for ALL Uploaded Files) */}
       {documents.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 p-4 shadow-2xl">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             {/* Summary details */}
             <div className="flex flex-wrap items-center gap-4 text-sm">
               <div>
-                <span className="text-xs text-gray-400 block font-medium">Print Scope:</span>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setPrintScope('current')}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                      printScope === 'current'
-                        ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                        : 'text-gray-500 hover:bg-gray-100'
-                    }`}
-                  >
-                    Current File ({activeDoc?.name.slice(0, 16)}...)
-                  </button>
-                  {documents.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setPrintScope('all')}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                        printScope === 'all'
-                          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300'
-                          : 'text-gray-500 hover:bg-gray-100'
-                      }`}
-                    >
-                      All ({documents.length} Files)
-                    </button>
-                  )}
-                </div>
+                <span className="text-xs text-gray-400 block font-medium">Batch Queue:</span>
+                <span className="font-bold text-gray-900 dark:text-gray-100">
+                  {docsToPrint.length} of {documents.length} Files Selected
+                </span>
               </div>
 
               <div className="border-l border-gray-200 dark:border-gray-700 pl-4">
-                <span className="text-xs text-gray-400 block font-medium">Sheets & Price:</span>
+                <span className="text-xs text-gray-400 block font-medium">Total Output Sheets:</span>
                 <div className="flex items-baseline gap-2 mt-0.5">
                   <span className="font-bold text-gray-900 dark:text-gray-100">
                     {totalPrintSheets} {totalPrintSheets === 1 ? 'Sheet' : 'Sheets'}
                   </span>
                   <span className="text-xs text-gray-500">
-                    ({docsToPrint.reduce((acc, d) => acc + d.selectedPages.size, 0)} pages)
+                    ({totalPagesSelected} pages total)
                   </span>
-                  <span className="text-lg font-extrabold text-indigo-600 dark:text-indigo-400">
-                    ₹{totalAmount}
+                </div>
+              </div>
+
+              <div className="border-l border-gray-200 dark:border-gray-700 pl-4">
+                <span className="text-xs text-gray-400 block font-medium">Combined Price:</span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                    ₹{freeMode ? '0' : totalAmount}
                   </span>
+                  {freeMode && <span className="text-[10px] text-emerald-600 font-bold">Admin Free</span>}
                 </div>
               </div>
             </div>
@@ -731,15 +858,15 @@ export default function PrintKioskPage() {
               {isPrinting ? (
                 <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Printing {docsToPrint.length} Document(s)...</span>
+                  <span>{printProgressText || `Printing ${docsToPrint.length} Document(s)...`}</span>
                 </>
               ) : (
                 <>
                   <Printer className="w-5 h-5" />
                   <span>
                     {freeMode
-                      ? `Print ${docsToPrint.length === 1 ? `"${docsToPrint[0].name.slice(0, 18)}"` : `All (${docsToPrint.length}) Documents`}`
-                      : `Proceed to Pay ₹${totalAmount} & Print (${docsToPrint.length} Doc)`}
+                      ? `Print All (${docsToPrint.length}) Files Now`
+                      : `Proceed to Pay ₹${totalAmount} & Print All (${docsToPrint.length}) Files`}
                   </span>
                   <ArrowRight className="w-5 h-5 ml-1" />
                 </>
@@ -753,8 +880,12 @@ export default function PrintKioskPage() {
       <PaymentModal
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
-        documentName={docsToPrint.length === 1 ? docsToPrint[0].name : `${docsToPrint.length} Documents Queue`}
-        totalOriginalPages={docsToPrint.reduce((acc, d) => acc + d.selectedPages.size, 0)}
+        documentName={
+          docsToPrint.length === 1
+            ? docsToPrint[0].name
+            : `${docsToPrint.length} Documents (${docsToPrint.map((d) => d.name).slice(0, 2).join(', ')}${docsToPrint.length > 2 ? '...' : ''})`
+        }
+        totalOriginalPages={totalPagesSelected}
         totalSheets={totalPrintSheets}
         copies={printSettings.copies}
         isColor={isColorPrinter}
