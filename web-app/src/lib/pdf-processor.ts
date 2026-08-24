@@ -209,9 +209,15 @@ export async function applyNupLayout(
       if (targetItemIdx >= filteredIndices.length) break;
 
       const srcPageIdx = filteredIndices[targetItemIdx];
-      const [embeddedPage] = await outDoc.embedPages([allSrcPages[srcPageIdx]]);
-      const origW = embeddedPage.width;
-      const origH = embeddedPage.height;
+      const srcPage = allSrcPages[srcPageIdx];
+      const mediaBox = srcPage.getMediaBox() || { x: 0, y: 0, width: srcPage.getWidth(), height: srcPage.getHeight() };
+      const rotation = (srcPage.getRotation()?.angle || 0) % 360;
+
+      const [embeddedPage] = await outDoc.embedPages([srcPage]);
+
+      const isRotated90or270 = rotation === 90 || rotation === 270;
+      const origW = isRotated90or270 ? (mediaBox.height || embeddedPage.height) : (mediaBox.width || embeddedPage.width);
+      const origH = isRotated90or270 ? (mediaBox.width || embeddedPage.width) : (mediaBox.height || embeddedPage.height);
 
       const r = Math.floor(slotIdx / cols);
       const c = slotIdx % cols;
@@ -229,11 +235,15 @@ export async function applyNupLayout(
       const drawX = cellX + (cellW - fittedW) / 2;
       const drawY = cellY + (cellH - fittedH) / 2;
 
+      // Adjust for non-zero MediaBox / CropBox origins so content is never drawn offscreen
+      const adjustedX = drawX - (mediaBox.x || 0) * scale;
+      const adjustedY = drawY - (mediaBox.y || 0) * scale;
+
       outPage.drawPage(embeddedPage, {
-        x: drawX,
-        y: drawY,
-        width: fittedW,
-        height: fittedH,
+        x: adjustedX,
+        y: adjustedY,
+        width: embeddedPage.width * scale,
+        height: embeddedPage.height * scale,
       });
 
       if (drawBorders) {
