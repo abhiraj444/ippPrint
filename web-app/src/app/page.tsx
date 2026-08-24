@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Uploader, UploadedFileItem } from '@/components/uploader';
@@ -70,11 +70,11 @@ export default function PrintKioskPage() {
   const [printErrorMessage, setPrintErrorMessage] = useState<string | null>(null);
   const [freeMode, setFreeMode] = useState<boolean>(false);
 
-  // Fetch live printers on load
-  const loadPrinters = useCallback(async () => {
+  // Fetch live printers on load & interval
+  const loadPrinters = useCallback(async (isInitial = false) => {
     try {
-      setIsLoadingPrinters(true);
-      const res = await fetch('/api/printers');
+      if (isInitial) setIsLoadingPrinters(true);
+      const res = await fetch('/api/printers', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.printers && data.printers.length > 0) {
@@ -83,18 +83,27 @@ export default function PrintKioskPage() {
           if (!printSettings.printerSlug || !data.printers.some((p: any) => p.slug === printSettings.printerSlug)) {
             setPrintSettings((s) => ({ ...s, printerSlug: data.printers[0].slug }));
           }
-          setAgentConnected(data.status !== 'fallback');
+          setAgentConnected(data.status === 'ok' || data.status !== 'fallback');
+        } else {
+          setAgentConnected(false);
         }
+      } else {
+        setAgentConnected(false);
       }
     } catch (err) {
       console.error('Failed to load printers:', err);
+      setAgentConnected(false);
     } finally {
-      setIsLoadingPrinters(false);
+      if (isInitial) setIsLoadingPrinters(false);
     }
   }, [printSettings.printerSlug]);
 
   useEffect(() => {
-    loadPrinters();
+    loadPrinters(true);
+    const interval = setInterval(() => {
+      loadPrinters(false);
+    }, 6000);
+    return () => clearInterval(interval);
   }, [loadPrinters]);
 
   // Handle adding new uploaded files
