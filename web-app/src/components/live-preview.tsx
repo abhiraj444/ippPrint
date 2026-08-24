@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Eye, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Sparkles } from 'lucide-react';
@@ -21,10 +21,26 @@ export function LivePreview({
   invertMode,
   isProcessing,
 }: LivePreviewProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [scale, setScale] = useState<number>(0.85);
-  const [isRendering, setIsRendering] = useState<boolean>(false);
-  const [renderError, setRenderError] = useState<string | null>(null);
+  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
+  const [useFallbackViewer, setUseFallbackViewer] = useState<boolean>(false);
+
+  // Maintain object URL for fallback viewer
+  useEffect(() => {
+    if (!pdfBytes || pdfBytes.length === 0) {
+      if (pdfObjectUrl) URL.revokeObjectURL(pdfObjectUrl);
+      setPdfObjectUrl(null);
+      return;
+    }
+
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    setPdfObjectUrl(url);
+    setUseFallbackViewer(false);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [pdfBytes]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -38,43 +54,58 @@ export function LivePreview({
 
         // Dynamically import pdfjs-dist in client
         const pdfjsLib = await import('pdfjs-dist');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
 
-        const loadingTask = pdfjsLib.getDocument({ data: pdfBytes.slice() });
-        const pdfDoc = await loadingTask.promise;
+        const renderPromise = (async () => {
+          const loadingTask = pdfjsLib.getDocument({
+            data: pdfBytes.slice(),
+            cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/cmaps/`,
+            cMapPacked: true,
+          });
 
-        if (isCancelled) return;
+          const pdfDoc = await loadingTask.promise;
+          if (isCancelled) return;
 
-        const pageNum = Math.min(Math.max(1, currentPage), pdfDoc.numPages);
-        const page = await pdfDoc.getPage(pageNum);
+          const pageNum = Math.min(Math.max(1, currentPage), pdfDoc.numPages);
+          const page = await pdfDoc.getPage(pageNum);
 
-        const canvas = canvasRef.current;
-        if (!canvas || isCancelled) return;
+          const canvas = canvasRef.current;
+          if (!canvas || isCancelled) return;
 
-        const viewport = page.getViewport({ scale: scale * 1.5 });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+          const viewport = page.getViewport({ scale: scale * 1.5 });
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
 
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
 
-        await page.render({
-          canvasContext: ctx,
-          viewport: viewport,
-        }).promise;
+          await page.render({
+            canvasContext: ctx,
+            viewport: viewport,
+          }).promise;
 
-        if (isCancelled) return;
+          if (isCancelled) return;
 
-        // Apply client-side color inversion to the preview if enabled
-        if (invertMode === 'all' || invertMode === 'custom') {
-          invertCanvasImageData(ctx, canvas.width, canvas.height, true);
+          // Apply client-side color inversion to the preview if enabled
+          if (invertMode === 'all' || invertMode === 'custom') {
+            invertCanvasImageData(ctx, canvas.width, canvas.height, true);
+          }
+        })();
+
+        // 3.5-second timeout guard to prevent infinite hanging
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Canvas render timeout')), 3500)
+        );
+
+        await Promise.race([renderPromise, timeoutPromise]);
+
+        if (!isCancelled) {
+          setIsRendering(false);
         }
-
-        setIsRendering(false);
       } catch (err: any) {
         if (!isCancelled) {
-          console.error('[LivePreview] Render error:', err);
-          setRenderError(err.message || 'Failed to render page preview');
+          console.warn('[LivePreview] Canvas notice, switching to direct PDF viewer:', err.message);
+          setUseFallbackViewer(true);
           setIsRendering(false);
         }
       }
@@ -135,6 +166,12 @@ export function LivePreview({
             <p className="font-semibold">Preview Render Notice</p>
             <p>{renderError}</p>
           </div>
+        ) : useFallbackViewer && pdfObjectUrl ? (
+          <iframe
+            src={`${pdfObjectUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+            className="w-full h-[460px] rounded-lg border-0 shadow-md bg-white"
+            title="Live PDF Preview"
+          />
         ) : (
           <canvas
             ref={canvasRef}

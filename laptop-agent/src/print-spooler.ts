@@ -6,6 +6,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
+import { PDFDocument } from 'pdf-lib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,12 +100,21 @@ export async function printDocument(
   jobId: number,
   documentName: string = `Job-${jobId}`
 ): Promise<void> {
-  // Sanitize document name for valid Windows filename
+  // Sanitize document name for valid Windows filename & print job title
   const cleanName = (documentName || `Job-${jobId}`)
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
     .trim()
     .slice(0, 80) || `Job-${jobId}`;
   const fileName = cleanName.toLowerCase().endsWith('.pdf') ? cleanName : `${cleanName}.pdf`;
+
+  // Embed clean title metadata into PDF binary
+  try {
+    const pdfDoc = await PDFDocument.load(data, { ignoreEncryption: true });
+    pdfDoc.setTitle(cleanName);
+    pdfDoc.setSubject(cleanName);
+    pdfDoc.setProducer('Cloud Print Kiosk');
+    data = Buffer.from(await pdfDoc.save());
+  } catch (e) {}
 
   // Use a dedicated per-job temp folder so the file is named with the real document name
   const jobDir = path.join(os.tmpdir(), `ipp-job-${jobId}-${Date.now()}`);
@@ -124,8 +134,15 @@ export async function printDocument(
       const isColor = isColorPrinter(printerName);
       const success = await rasterizePdf(tempFile, rasterFile, RASTER_DPI, isColor);
       if (success && fsSync.existsSync(rasterFile)) {
-        // Overwrite tempFile with the rasterized PDF so the final file in jobDir has the exact clean fileName
-        await fs.copyFile(rasterFile, tempFile);
+        // Re-embed title in rasterized PDF as well
+        try {
+          const rasterBytes = await fs.readFile(rasterFile);
+          const rasterDoc = await PDFDocument.load(rasterBytes, { ignoreEncryption: true });
+          rasterDoc.setTitle(cleanName);
+          await fs.writeFile(tempFile, await rasterDoc.save());
+        } catch {
+          await fs.copyFile(rasterFile, tempFile);
+        }
         try { await fs.unlink(rasterFile); } catch {}
         fileToPrint = tempFile;
       }
@@ -135,22 +152,39 @@ export async function printDocument(
     if (platform === 'win32') {
       console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Windows with clean document title...`);
       
-      const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
-      if (fsSync.existsSync(sumatraExe)) {
-        // Pass only the relative filename and set cwd to jobDir.
-        // This causes Windows Spooler and the printer screen to display "DocumentName.pdf" rather than "C:\Users\..."
-        await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
-          cwd: jobDir,
-          windowsHide: true
-        });
-      } else {
-        await pdfToPrinter.print(fileToPrint, { printer: printerName });
+      const gs = findGhostscript();
+      let spooled = false;
+
+      // 1. Try direct Ghostscript Windows print device (sets DOCINFO.lpszDocName explicitly)
+      if (gs) {
+        try {
+          console.log(`[printer] Spooling via Ghostscript mswinpr2 with DocumentName "${cleanName}"...`);
+          const gsCmd = `"${gs}" -dNOPAUSE -dBATCH -dQUIET -sDEVICE=mswinpr2 -sOutputFile="%printer%${printerName}" -c "mark /UserSettings <</DocumentName (${cleanName})>> (mswinpr2) finddevice putdeviceprops setdevice" -f "${fileToPrint}"`;
+          await execAsync(gsCmd, { windowsHide: true });
+          spooled = true;
+          console.log(`[printer] Ghostscript direct spooling completed for "${cleanName}"`);
+        } catch (gsErr) {
+          console.warn(`[printer] Ghostscript direct spooling notice:`, gsErr);
+        }
+      }
+
+      // 2. Fallback to SumatraPDF if needed
+      if (!spooled) {
+        const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
+        if (fsSync.existsSync(sumatraExe)) {
+          await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
+            cwd: jobDir,
+            windowsHide: true
+          });
+        } else {
+          await pdfToPrinter.print(fileToPrint, { printer: printerName });
+        }
       }
 
       console.log(`[printer] Successfully sent "${fileName}" (job ${jobId}) to printer "${printerName}"`);
     } else {
       console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Unix-like...`);
-      await execAsync(`lp -d '${printerName}' '${fileToPrint}'`);
+      await execAsync(`lp -d '${printerName}' -t '${cleanName}' '${fileToPrint}'`);
       console.log(`[printer] Spooled "${fileName}" (job ${jobId}) to "${printerName}" successfully`);
     }
   } catch (err) {
