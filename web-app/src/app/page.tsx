@@ -85,6 +85,9 @@ export default function PrintKioskPage() {
   const [freeMode, setFreeMode] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const anyInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch live printers on load & interval
   const loadPrinters = useCallback(async (isInitial = false) => {
@@ -508,12 +511,45 @@ export default function PrintKioskPage() {
         </div>
       )}
 
-      {/* Hidden File Input for uploading multiple files */}
+      {/* Hidden File Inputs for Android and Desktop multi-selection */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,image/*"
+        accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
+        onChange={(e) => {
+          if (e.target.files) handleFilesAdded(e.target.files);
+          e.target.value = '';
+        }}
+        className="hidden"
+      />
+      <input
+        ref={pdfInputRef}
+        type="file"
+        multiple
+        accept="application/pdf,.pdf"
+        onChange={(e) => {
+          if (e.target.files) handleFilesAdded(e.target.files);
+          e.target.value = '';
+        }}
+        className="hidden"
+      />
+      <input
+        ref={imageInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        onChange={(e) => {
+          if (e.target.files) handleFilesAdded(e.target.files);
+          e.target.value = '';
+        }}
+        className="hidden"
+      />
+      <input
+        ref={anyInputRef}
+        type="file"
+        multiple
+        accept="*/*"
         onChange={(e) => {
           if (e.target.files) handleFilesAdded(e.target.files);
           e.target.value = '';
@@ -521,7 +557,7 @@ export default function PrintKioskPage() {
         className="hidden"
       />
 
-      {/* Drag & Drop Multi-file Upload Bar */}
+      {/* Drag & Drop Multi-file Upload Bar with Android-optimized buttons */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
@@ -533,36 +569,59 @@ export default function PrintKioskPage() {
           setIsDraggingOver(false);
           if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files);
         }}
-        onClick={() => fileInputRef.current?.click()}
-        className={`border-2 border-dashed rounded-3xl p-6 text-center transition-all cursor-pointer flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm ${
+        className={`border-2 border-dashed rounded-3xl p-6 text-center transition-all flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm ${
           isDraggingOver
             ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 ring-4 ring-indigo-600/20'
-            : 'border-gray-200 dark:border-gray-800 hover:border-indigo-400 bg-white dark:bg-gray-900'
+            : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900'
         }`}
       >
-        <div className="flex items-center gap-4 text-left">
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-4 text-left cursor-pointer flex-1"
+        >
           <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
             <UploadCloud className="w-6 h-6" />
           </div>
           <div>
             <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100">
               {documents.length === 0
-                ? 'Upload Documents to Print (Select Multiple PDFs / Images)'
-                : 'Add More Documents to Print Queue'}
+                ? 'Upload Documents to Print (Select Multiple PDFs & Images)'
+                : 'Add More Files to Print Queue'}
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Drag & drop multiple files here, or click to select from your device
+              Select multiple PDFs or photos from your Android phone or computer
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-1.5 flex-shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{documents.length === 0 ? 'Select Files' : 'Add Files'}</span>
-        </button>
+        {/* Mobile & Desktop Tap-Friendly Selectors */}
+        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => pdfInputRef.current?.click()}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all"
+          >
+            <FileText className="w-4 h-4" />
+            <span>+ Add PDFs</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => imageInputRef.current?.click()}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Add Photos</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3.5 py-2.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all"
+          >
+            <span>Browse Any</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Multi-Document Content */}

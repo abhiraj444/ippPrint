@@ -19,27 +19,120 @@ const PAPER_DIMENSIONS: Record<string, [number, number]> = {
 };
 
 /**
- * Convert an image (JPEG, PNG, etc.) to a standard PDF document Buffer
+ * Convert an image (JPEG, PNG, WEBP, BMP, GIF, etc.) to a standard A4-fitted PDF document
  */
 export async function imageToPdf(imageBytes: Uint8Array, mimeType: string): Promise<Uint8Array> {
-  const pdfDoc = await PDFDocument.create();
-  let image;
-  if (mimeType.includes('png')) {
-    image = await pdfDoc.embedPng(imageBytes);
-  } else {
-    image = await pdfDoc.embedJpg(imageBytes);
+  const [a4W, a4H] = PAPER_DIMENSIONS.A4;
+
+  // 1. Try direct embedding if standard PNG or JPG
+  try {
+    const pdfDoc = await PDFDocument.create();
+    let image;
+
+    if (mimeType && mimeType.toLowerCase().includes('png')) {
+      try {
+        image = await pdfDoc.embedPng(imageBytes);
+      } catch {
+        image = await pdfDoc.embedJpg(imageBytes);
+      }
+    } else {
+      try {
+        image = await pdfDoc.embedJpg(imageBytes);
+      } catch {
+        image = await pdfDoc.embedPng(imageBytes);
+      }
+    }
+
+    if (image) {
+      const isLandscape = image.width > image.height;
+      const pageW = isLandscape ? a4H : a4W;
+      const pageH = isLandscape ? a4W : a4H;
+
+      const scale = Math.min((pageW - 40) / image.width, (pageH - 40) / image.height, 1.0);
+      const drawW = image.width * scale;
+      const drawH = image.height * scale;
+      const x = (pageW - drawW) / 2;
+      const y = (pageH - drawH) / 2;
+
+      const page = pdfDoc.addPage([pageW, pageH]);
+      page.drawImage(image, {
+        x,
+        y,
+        width: drawW,
+        height: drawH,
+      });
+
+      return await pdfDoc.save();
+    }
+  } catch (directErr) {
+    console.warn('[imageToPdf] Direct embed failed, falling back to Canvas rendering:', directErr);
   }
 
-  const { width, height } = image;
-  const page = pdfDoc.addPage([width, height]);
-  page.drawImage(image, {
-    x: 0,
-    y: 0,
-    width,
-    height,
-  });
+  // 2. Universal HTML Canvas fallback (works for WEBP, BMP, GIF, screenshots, camera photos)
+  return new Promise<Uint8Array>((resolve, reject) => {
+    try {
+      const blob = new Blob([imageBytes as any], { type: mimeType || 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
 
-  return await pdfDoc.save();
+      img.onload = async () => {
+        try {
+          URL.revokeObjectURL(url);
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width || 800;
+          canvas.height = img.naturalHeight || img.height || 600;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) throw new Error('Could not create canvas context');
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+          const base64Data = dataUrl.split(',')[1];
+          const binaryStr = atob(base64Data);
+          const jpgBytes = new Uint8Array(binaryStr.length);
+          for (let j = 0; j < binaryStr.length; j++) {
+            jpgBytes[j] = binaryStr.charCodeAt(j);
+          }
+
+          const pdfDoc = await PDFDocument.create();
+          const embeddedImg = await pdfDoc.embedJpg(jpgBytes);
+
+          const isLandscape = embeddedImg.width > embeddedImg.height;
+          const pageW = isLandscape ? a4H : a4W;
+          const pageH = isLandscape ? a4W : a4H;
+
+          const scale = Math.min((pageW - 40) / embeddedImg.width, (pageH - 40) / embeddedImg.height, 1.0);
+          const drawW = embeddedImg.width * scale;
+          const drawH = embeddedImg.height * scale;
+          const x = (pageW - drawW) / 2;
+          const y = (pageH - drawH) / 2;
+
+          const page = pdfDoc.addPage([pageW, pageH]);
+          page.drawImage(embeddedImg, {
+            x,
+            y,
+            width: drawW,
+            height: drawH,
+          });
+
+          resolve(await pdfDoc.save());
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to load image into browser'));
+      };
+
+      img.src = url;
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
 /**
