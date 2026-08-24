@@ -58,7 +58,7 @@ export class TunnelDO extends DurableObject {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error('Gateway Timeout'));
-      }, 30000) as unknown as number;
+      }, 180000) as unknown as number; // 3 minutes timeout for large multi-page print documents
       
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
     });

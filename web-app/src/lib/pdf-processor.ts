@@ -159,6 +159,23 @@ export async function applyNupLayout(
 
   const invertSet = new Set(invertedPageIndices || []);
 
+  // Ultra-fast path for 1-in-1 without inversion: Instant vector page copy in < 10ms
+  if (nup === 1 && invertSet.size === 0) {
+    const fastDoc = await PDFDocument.create();
+    if (documentTitle) {
+      fastDoc.setTitle(documentTitle);
+      fastDoc.setSubject(documentTitle);
+      fastDoc.setProducer('Cloud Print Kiosk');
+    }
+    const srcPdfDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
+    const copiedPages = await fastDoc.copyPages(srcPdfDoc, filteredIndices);
+    copiedPages.forEach((p) => fastDoc.addPage(p));
+    return {
+      pdfBytes: await fastDoc.save(),
+      totalSheets: filteredIndices.length,
+    };
+  }
+
   let cols = 1;
   let rows = 1;
   if (nup === 2) { cols = 2; rows = 1; }
