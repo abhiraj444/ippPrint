@@ -150,16 +150,51 @@ export async function printDocument(
 
     const platform = os.platform();
     if (platform === 'win32') {
-      console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Windows with clean document title...`);
+      console.log(`[printer] Spooling "${fileName}" to "${printerName}" on Windows with clean document title "${cleanName}"...`);
       
-      const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
-      if (fsSync.existsSync(sumatraExe)) {
-        await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
-          cwd: jobDir,
-          windowsHide: true
-        });
-      } else {
-        await pdfToPrinter.print(fileToPrint, { printer: printerName });
+      let spooled = false;
+      const gs = findGhostscript();
+      const psScript = path.join(__dirname, '..', 'scripts', 'print-windows.ps1');
+
+      // 1. Try native Windows .NET PrintDocument via Ghostscript PNG rendering
+      if (gs && fsSync.existsSync(psScript)) {
+        try {
+          const isColor = isColorPrinter(printerName);
+          const device = isColor ? 'png16m' : 'pnggray';
+          const outPattern = path.join(jobDir, 'page_%03d.png');
+          
+          console.log(`[printer] Rasterizing to PNG (${device} @ ${RASTER_DPI} DPI) for native Windows spooler...`);
+          const gsCmd = `"${gs}" -dNOPAUSE -dBATCH -dQUIET -sDEVICE=${device} -r${RASTER_DPI} "-sOutputFile=${outPattern}" "${fileToPrint}"`;
+          await execAsync(gsCmd, { windowsHide: true });
+
+          const imageFiles = fsSync.readdirSync(jobDir)
+            .filter((f) => f.startsWith('page_') && f.endsWith('.png'))
+            .sort()
+            .map((f) => path.join(jobDir, f));
+
+          if (imageFiles.length > 0) {
+            console.log(`[printer] Spooling ${imageFiles.length} page(s) via PowerShell PrintDocument with Title "${cleanName}"...`);
+            const psCmd = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${psScript}" -PrinterName "${printerName}" -DocumentName "${cleanName}" -ImageFiles ${imageFiles.map((f) => `"${f}"`).join(',')}`;
+            await execAsync(psCmd, { windowsHide: true });
+            spooled = true;
+            console.log(`[printer] Native Windows PrintDocument successfully spooled "${cleanName}"!`);
+          }
+        } catch (psErr) {
+          console.warn(`[printer] Native PrintDocument fallback notice:`, psErr);
+        }
+      }
+
+      // 2. Fallback to SumatraPDF if needed
+      if (!spooled) {
+        const sumatraExe = path.join(__dirname, '..', 'node_modules', 'pdf-to-printer', 'dist', 'SumatraPDF-3.4.6-32.exe');
+        if (fsSync.existsSync(sumatraExe)) {
+          await execFileAsync(sumatraExe, ['-print-to', printerName, '-silent', fileName], {
+            cwd: jobDir,
+            windowsHide: true
+          });
+        } else {
+          await pdfToPrinter.print(fileToPrint, { printer: printerName });
+        }
       }
 
       console.log(`[printer] Successfully sent "${fileName}" (job ${jobId}) to printer "${printerName}"`);

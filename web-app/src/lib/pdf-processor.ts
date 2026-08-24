@@ -1,4 +1,5 @@
 import { PDFDocument, rgb, degrees, PageSizes } from 'pdf-lib';
+import { invertCanvasImageData } from '@/lib/color-inverter';
 
 export interface NupOptions {
   nup: number; // 1, 2, 3, 4, 6, 9
@@ -55,6 +56,72 @@ export async function mergePdfs(pdfBuffers: Uint8Array[]): Promise<Uint8Array> {
     copiedPages.forEach((p) => mergedDoc.addPage(p));
   }
   return await mergedDoc.save();
+}
+
+/**
+ * Invert specific pages of a PDF document by rasterizing them to high-res inverted images
+ */
+export async function invertPdfPages(
+  sourcePdfBytes: Uint8Array,
+  invertedPageIndices: number[]
+): Promise<Uint8Array> {
+  if (!invertedPageIndices || invertedPageIndices.length === 0) {
+    return sourcePdfBytes;
+  }
+
+  const invertSet = new Set(invertedPageIndices);
+  const pdfjsLib = await import('pdfjs-dist');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
+
+  const loadingTask = pdfjsLib.getDocument({
+    data: sourcePdfBytes.slice(),
+    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/cmaps/`,
+    cMapPacked: true,
+  });
+
+  const pdfDoc = await loadingTask.promise;
+  const outDoc = await PDFDocument.create();
+  const srcPdfDoc = await PDFDocument.load(sourcePdfBytes, { ignoreEncryption: true });
+
+  for (let i = 0; i < pdfDoc.numPages; i++) {
+    const pageNum = i + 1;
+    if (invertSet.has(i)) {
+      // Rasterize & Invert this page at high print quality
+      const page = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        invertCanvasImageData(ctx, canvas.width, canvas.height, true);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        const base64Data = dataUrl.split(',')[1];
+        const binaryStr = atob(base64Data);
+        const imageBytes = new Uint8Array(binaryStr.length);
+        for (let j = 0; j < binaryStr.length; j++) {
+          imageBytes[j] = binaryStr.charCodeAt(j);
+        }
+        const embeddedImg = await outDoc.embedJpg(imageBytes);
+
+        const origPage = srcPdfDoc.getPage(i);
+        const { width: origW, height: origH } = origPage.getSize();
+        const newPage = outDoc.addPage([origW, origH]);
+        newPage.drawImage(embeddedImg, {
+          x: 0,
+          y: 0,
+          width: origW,
+          height: origH,
+        });
+      }
+    } else {
+      const [copiedPage] = await outDoc.copyPages(srcPdfDoc, [i]);
+      outDoc.addPage(copiedPage);
+    }
+  }
+
+  return await outDoc.save();
 }
 
 /**

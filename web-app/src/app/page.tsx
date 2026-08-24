@@ -218,7 +218,7 @@ export default function PrintKioskPage() {
     };
   }, [files]);
 
-  // Re-generate N-in-1 Transformed PDF whenever options or selectedPages change
+  // Re-generate N-in-1 Transformed PDF whenever options, selectedPages, or invertedPages change
   useEffect(() => {
     let isCancelled = false;
 
@@ -230,9 +230,19 @@ export default function PrintKioskPage() {
       }
 
       try {
+        setIsProcessing(true);
         const sortedSelectedIndices = Array.from(selectedPages).sort((a, b) => a - b);
+
+        // 1. If any pages are marked for inversion, apply pixel-level inversion to the PDF binary
+        let processedSourcePdf = originalPdfBytes;
+        if (invertedPages.size > 0) {
+          const { invertPdfPages } = await import('@/lib/pdf-processor');
+          processedSourcePdf = await invertPdfPages(originalPdfBytes, Array.from(invertedPages));
+        }
+
+        // 2. Apply N-in-1 layout imposition with clean Document Title
         const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(
-          originalPdfBytes,
+          processedSourcePdf,
           nupOptions,
           mainDocName,
           sortedSelectedIndices
@@ -243,8 +253,10 @@ export default function PrintKioskPage() {
         setTransformedPdfBytes(nupBytes);
         setTotalSheets(calculatedSheets);
         setCurrentSheetIndex(1);
+        setIsProcessing(false);
       } catch (err) {
         console.error('[Processor] Error updating transformed PDF:', err);
+        if (!isCancelled) setIsProcessing(false);
       }
     }
 
@@ -253,7 +265,7 @@ export default function PrintKioskPage() {
     return () => {
       isCancelled = true;
     };
-  }, [originalPdfBytes, totalOriginalPages, selectedPages, nupOptions, mainDocName]);
+  }, [originalPdfBytes, totalOriginalPages, selectedPages, invertedPages, nupOptions, mainDocName]);
 
   // Page Grid Selection Handlers
   const togglePageSelect = (idx: number) => {
