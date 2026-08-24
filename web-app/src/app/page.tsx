@@ -28,9 +28,7 @@ export default function PrintKioskPage() {
   // 1. Files state
   const [files, setFiles] = useState<UploadedFileItem[]>([]);
   const [originalPdfBytes, setOriginalPdfBytes] = useState<Uint8Array | null>(null);
-  const [transformedPdfBytes, setTransformedPdfBytes] = useState<Uint8Array | null>(null);
   const [totalOriginalPages, setTotalOriginalPages] = useState<number>(0);
-  const [totalSheets, setTotalSheets] = useState<number>(0);
   const [currentSheetIndex, setCurrentSheetIndex] = useState<number>(1);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
@@ -138,9 +136,7 @@ export default function PrintKioskPage() {
   const handleClearAll = () => {
     setFiles([]);
     setOriginalPdfBytes(null);
-    setTransformedPdfBytes(null);
     setTotalOriginalPages(0);
-    setTotalSheets(0);
     setSelectedPages(new Set());
     setInvertedPages(new Set());
   };
@@ -155,9 +151,7 @@ export default function PrintKioskPage() {
     async function processFiles() {
       if (files.length === 0) {
         setOriginalPdfBytes(null);
-        setTransformedPdfBytes(null);
         setTotalOriginalPages(0);
-        setTotalSheets(0);
         setSelectedPages(new Set());
         setInvertedPages(new Set());
         return;
@@ -218,49 +212,18 @@ export default function PrintKioskPage() {
     };
   }, [files]);
 
-  // Re-generate N-in-1 Transformed PDF whenever options, selectedPages, or invertedPages change
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function generateTransformedPdf() {
-      if (!originalPdfBytes || totalOriginalPages === 0 || selectedPages.size === 0) {
-        setTransformedPdfBytes(null);
-        setTotalSheets(0);
-        return;
-      }
-
-      try {
-        setIsProcessing(true);
-        const sortedSelectedIndices = Array.from(selectedPages).sort((a, b) => a - b);
-        const sortedInvertedIndices = Array.from(invertedPages).sort((a, b) => a - b);
-
-        // Apply N-in-1 layout imposition and color inversion in a single high-fidelity pass
-        const { pdfBytes: nupBytes, totalSheets: calculatedSheets } = await applyNupLayout(
-          originalPdfBytes,
-          nupOptions,
-          mainDocName,
-          sortedSelectedIndices,
-          sortedInvertedIndices
-        );
-
-        if (isCancelled) return;
-
-        setTransformedPdfBytes(nupBytes);
-        setTotalSheets(calculatedSheets);
-        setCurrentSheetIndex(1);
-        setIsProcessing(false);
-      } catch (err) {
-        console.error('[Processor] Error updating transformed PDF:', err);
-        if (!isCancelled) setIsProcessing(false);
-      }
-    }
-
-    generateTransformedPdf();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [originalPdfBytes, totalOriginalPages, selectedPages, invertedPages, nupOptions, mainDocName]);
+  // Instantaneous N-in-1 total sheet calculation (0ms computation)
+  const getSlotsPerPage = (nup: number, rows?: number, cols?: number) => {
+    if (nup === 2) return 2;
+    if (nup === 3) return 3;
+    if (nup === 4) return 4;
+    if (nup === 6) return 6;
+    if (nup === 9) return 9;
+    if (rows && cols) return rows * cols;
+    return 1;
+  };
+  const slotsPerPage = getSlotsPerPage(nupOptions.nup, nupOptions.rows, nupOptions.cols);
+  const totalSheets = Math.max(1, Math.ceil(selectedPages.size / slotsPerPage));
 
   // Page Grid Selection Handlers
   const togglePageSelect = (idx: number) => {
@@ -325,18 +288,30 @@ export default function PrintKioskPage() {
 
   // Dispatch Print Execution
   const executePrint = async () => {
-    if (!transformedPdfBytes) return;
+    if (!originalPdfBytes || selectedPages.size === 0) return;
 
     try {
       setIsPrinting(true);
       setPrintSuccessMessage(null);
       setPrintErrorMessage(null);
 
+      const sortedSelected = Array.from(selectedPages).sort((a, b) => a - b);
+      const sortedInverted = Array.from(invertedPages).sort((a, b) => a - b);
+
+      // Generate the final high-res print document on demand
+      const { pdfBytes: printPdfBytes } = await applyNupLayout(
+        originalPdfBytes,
+        nupOptions,
+        mainDocName,
+        sortedSelected,
+        sortedInverted
+      );
+
       // Convert Uint8Array to base64
       let binary = '';
-      const len = transformedPdfBytes.byteLength;
+      const len = printPdfBytes.byteLength;
       for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(transformedPdfBytes[i]);
+        binary += String.fromCharCode(printPdfBytes[i]);
       }
       const pdfBase64 = btoa(binary);
 
@@ -389,7 +364,7 @@ export default function PrintKioskPage() {
   };
 
   const handlePrintClick = () => {
-    if (!transformedPdfBytes || selectedPages.size === 0) return;
+    if (!originalPdfBytes || selectedPages.size === 0) return;
     if (freeMode) {
       executePrint();
     } else {
@@ -617,12 +592,13 @@ export default function PrintKioskPage() {
             />
           ) : (
             <LivePreview
-              pdfBytes={transformedPdfBytes}
-              currentPage={currentSheetIndex}
-              totalPages={totalSheets}
+              sourcePdfBytes={originalPdfBytes}
+              nupOptions={nupOptions}
+              selectedPages={selectedPages}
+              invertedPages={invertedPages}
+              currentSheet={currentSheetIndex}
+              totalSheets={totalSheets}
               onPageChange={setCurrentSheetIndex}
-              invertMode={invertOptions.mode}
-              isProcessing={isProcessing}
             />
           )}
         </div>
