@@ -6,6 +6,7 @@ import { PrintSettings, PrinterInfo, PrintJobSettings } from '@/components/print
 import { LivePreview } from '@/components/live-preview';
 import { PageGrid } from '@/components/page-grid';
 import { PaymentModal } from '@/components/payment-modal';
+import { AdminModal } from '@/components/admin-modal';
 import { NupOptions, imageToPdf, applyNupLayout } from '@/lib/pdf-processor';
 import { PDFDocument } from 'pdf-lib';
 import {
@@ -16,6 +17,9 @@ import {
   AlertCircle,
   Clock,
   Shield,
+  ShieldCheck,
+  Lock,
+  Unlock,
   Layers,
   ArrowRight,
   Eye,
@@ -83,6 +87,21 @@ export default function PrintKioskPage() {
   const [printSuccessMessage, setPrintSuccessMessage] = useState<string | null>(null);
   const [printErrorMessage, setPrintErrorMessage] = useState<string | null>(null);
   const [freeMode, setFreeMode] = useState<boolean>(false);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+
+  const handleAdminLogin = (pw: string) => {
+    if (pw === 'admin' || pw === 'admin123' || pw === 'kiosk@2026' || pw === 'abhinav') {
+      setIsAdmin(true);
+      return true;
+    }
+    return false;
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdmin(false);
+    setFreeMode(false);
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -99,7 +118,8 @@ export default function PrintKioskPage() {
         if (data.printers && data.printers.length > 0) {
           setPrinters(data.printers);
           if (!printSettings.printerSlug || !data.printers.some((p: any) => p.slug === printSettings.printerSlug)) {
-            setPrintSettings((s) => ({ ...s, printerSlug: data.printers[0].slug }));
+            const canon = data.printers.find((p: any) => p.slug === 'canonir7105' || p.slug.toLowerCase().includes('canon'));
+            setPrintSettings((s) => ({ ...s, printerSlug: canon ? canon.slug : data.printers[0].slug }));
           }
           setAgentConnected(data.status === 'ok' || data.status !== 'fallback');
         } else {
@@ -111,6 +131,8 @@ export default function PrintKioskPage() {
           const fallbackData = await fallbackRes.json();
           if (fallbackData.printers && fallbackData.printers.length > 0) {
             setPrinters(fallbackData.printers);
+            const canon = fallbackData.printers.find((p: any) => p.slug === 'canonir7105' || p.slug.toLowerCase().includes('canon'));
+            setPrintSettings((s) => ({ ...s, printerSlug: canon ? canon.slug : fallbackData.printers[0].slug }));
             setAgentConnected(fallbackData.status === 'ok');
           }
         }
@@ -464,16 +486,42 @@ export default function PrintKioskPage() {
             <span>{agentConnected ? 'Printer Online' : 'Connecting Agent...'}</span>
           </div>
 
-          {/* Admin Free Toggle */}
-          <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-3 py-1.5 rounded-full cursor-pointer hover:bg-gray-200 transition-colors">
-            <input
-              type="checkbox"
-              checked={freeMode}
-              onChange={(e) => setFreeMode(e.target.checked)}
-              className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500"
-            />
-            <span>Free / Admin Mode</span>
-          </label>
+          {/* Password-Protected Admin Button */}
+          {!isAdmin ? (
+            <button
+              type="button"
+              onClick={() => setIsAdminModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
+              title="Admin Settings (Password Protected)"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Admin</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsAdminModalOpen(true)}
+                className="px-3.5 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 shadow-sm ring-2 ring-indigo-500/20 hover:bg-indigo-100 transition-colors"
+              >
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Admin Settings</span>
+                {freeMode && (
+                  <span className="bg-emerald-600 text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold">
+                    FREE ACTIVE
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleAdminLogout}
+                className="text-xs text-red-500 hover:underline font-bold px-1"
+                title="Lock Admin Mode"
+              >
+                Lock
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -520,7 +568,10 @@ export default function PrintKioskPage() {
         onDrop={(e) => {
           e.preventDefault();
           setIsDraggingOver(false);
-          if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files);
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const files = Array.from(e.dataTransfer.files);
+            handleFilesAdded(files);
+          }
         }}
         className={`border-2 border-dashed rounded-3xl p-6 text-center transition-all flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm ${
           isDraggingOver
@@ -534,8 +585,11 @@ export default function PrintKioskPage() {
             multiple
             accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
             onChange={(e) => {
-              if (e.target.files) handleFilesAdded(e.target.files);
-              e.target.value = '';
+              if (e.target.files && e.target.files.length > 0) {
+                const files = Array.from(e.target.files);
+                e.target.value = '';
+                handleFilesAdded(files);
+              }
             }}
             className="sr-only"
           />
@@ -564,8 +618,11 @@ export default function PrintKioskPage() {
               multiple
               accept="application/pdf,.pdf"
               onChange={(e) => {
-                if (e.target.files) handleFilesAdded(e.target.files);
-                e.target.value = '';
+                if (e.target.files && e.target.files.length > 0) {
+                  const files = Array.from(e.target.files);
+                  e.target.value = '';
+                  handleFilesAdded(files);
+                }
               }}
               className="sr-only"
             />
@@ -579,8 +636,11 @@ export default function PrintKioskPage() {
               multiple
               accept="image/*"
               onChange={(e) => {
-                if (e.target.files) handleFilesAdded(e.target.files);
-                e.target.value = '';
+                if (e.target.files && e.target.files.length > 0) {
+                  const files = Array.from(e.target.files);
+                  e.target.value = '';
+                  handleFilesAdded(files);
+                }
               }}
               className="sr-only"
             />
@@ -593,8 +653,11 @@ export default function PrintKioskPage() {
               multiple
               accept="*/*"
               onChange={(e) => {
-                if (e.target.files) handleFilesAdded(e.target.files);
-                e.target.value = '';
+                if (e.target.files && e.target.files.length > 0) {
+                  const files = Array.from(e.target.files);
+                  e.target.value = '';
+                  handleFilesAdded(files);
+                }
               }}
               className="sr-only"
             />
@@ -812,6 +875,7 @@ export default function PrintKioskPage() {
                     onResetInvert={resetInvert}
                     onSelectOdd={selectOddPages}
                     onSelectEven={selectEvenPages}
+                    isAdmin={isAdmin}
                   />
                 ) : (
                   <LivePreview
@@ -842,6 +906,7 @@ export default function PrintKioskPage() {
                   printers={printers}
                   isLoadingPrinters={isLoadingPrinters}
                   onRefreshPrinters={() => loadPrinters(true)}
+                  isAdmin={isAdmin}
                 />
               </div>
             </div>
@@ -929,6 +994,21 @@ export default function PrintKioskPage() {
         isDuplex={isDuplexMode}
         onPaymentSuccess={executePrint}
         isPrinting={isPrinting}
+      />
+
+      {/* Password-Protected Admin Portal Modal */}
+      <AdminModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        isAdmin={isAdmin}
+        onLogin={handleAdminLogin}
+        onLogout={handleAdminLogout}
+        freeMode={freeMode}
+        onToggleFreeMode={setFreeMode}
+        printers={printers}
+        selectedPrinterSlug={printSettings.printerSlug}
+        onSelectPrinter={(slug) => setPrintSettings((s) => ({ ...s, printerSlug: slug }))}
+        agentConnected={agentConnected}
       />
     </main>
   );

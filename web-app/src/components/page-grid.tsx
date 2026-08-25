@@ -27,6 +27,7 @@ interface PageGridProps {
   onResetInvert: () => void;
   onSelectOdd: () => void;
   onSelectEven: () => void;
+  isAdmin?: boolean;
 }
 
 // Lightweight, on-demand canvas thumbnail component
@@ -38,6 +39,7 @@ function PageThumbnailCard({
   onToggleSelect,
   onToggleInvert,
   onOpenModal,
+  isAdmin = false,
 }: {
   pdfDoc: any;
   pageIndex: number;
@@ -46,6 +48,7 @@ function PageThumbnailCard({
   onToggleSelect: (idx: number) => void;
   onToggleInvert: (idx: number) => void;
   onOpenModal: (idx: number) => void;
+  isAdmin?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isRendered, setIsRendered] = useState<boolean>(false);
@@ -116,19 +119,21 @@ function PageThumbnailCard({
           <span>#{pageIndex + 1}</span>
         </button>
 
-        {/* Per-Page Invert Toggle */}
-        <button
-          type="button"
-          onClick={() => onToggleInvert(pageIndex)}
-          title={isInverted ? 'Toner Saver Active (Inverted)' : 'Invert Dark Colors to Save Toner'}
-          className={`p-1 rounded-lg transition-colors ${
-            isInverted
-              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold'
-              : 'text-gray-400 hover:text-indigo-600 hover:bg-gray-200 dark:hover:bg-gray-700'
-          }`}
-        >
-          <SunMoon className="w-3.5 h-3.5" />
-        </button>
+        {/* Per-Page Invert Toggle (Admin only) */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => onToggleInvert(pageIndex)}
+            title={isInverted ? 'Toner Saver Active (Inverted)' : 'Invert Dark Colors to Save Toner'}
+            className={`p-1 rounded-lg transition-colors ${
+              isInverted
+                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 font-bold'
+                : 'text-gray-400 hover:text-indigo-600 hover:bg-gray-200 dark:hover:bg-gray-700'
+            }`}
+          >
+            <SunMoon className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Thumbnail Image Container */}
@@ -178,6 +183,7 @@ export function PageGrid({
   onResetInvert,
   onSelectOdd,
   onSelectEven,
+  isAdmin = false,
 }: PageGridProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -294,7 +300,7 @@ export function PageGrid({
             Page Grid & Selection ({selectedPages.size} of {numPages} selected)
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Click checkboxes to include/exclude pages, toggle dark mode toner saver per page, or click any page to zoom.
+            Click checkboxes to include/exclude pages, or click any page to zoom.
           </p>
         </div>
 
@@ -328,21 +334,26 @@ export function PageGrid({
           >
             None
           </button>
-          <span className="text-gray-300 dark:text-gray-700">|</span>
-          <button
-            type="button"
-            onClick={onInvertAll}
-            className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1"
-          >
-            <SunMoon className="w-3.5 h-3.5" /> Invert All
-          </button>
-          <button
-            type="button"
-            onClick={onResetInvert}
-            className="px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 font-medium text-gray-500"
-          >
-            Reset Invert
-          </button>
+
+          {isAdmin && (
+            <>
+              <span className="text-gray-300 dark:text-gray-700">|</span>
+              <button
+                type="button"
+                onClick={onInvertAll}
+                className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-medium flex items-center gap-1"
+              >
+                <SunMoon className="w-3.5 h-3.5" /> Invert All
+              </button>
+              <button
+                type="button"
+                onClick={onResetInvert}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 font-medium text-gray-500"
+              >
+                Reset Invert
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -364,6 +375,7 @@ export function PageGrid({
               onToggleSelect={onToggleSelect}
               onToggleInvert={onToggleInvert}
               onOpenModal={(i) => setModalPageIndex(i)}
+              isAdmin={isAdmin}
             />
           ))}
         </div>
