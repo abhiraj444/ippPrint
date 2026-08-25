@@ -100,15 +100,12 @@ export function AdminModal({
               </label>
               <input
                 type="password"
-                placeholder="Enter password..."
+                placeholder="Enter admin password..."
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 autoFocus
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm focus:ring-2 focus:ring-indigo-600 text-gray-900 dark:text-gray-100 outline-none"
               />
-              <p className="text-[11px] text-gray-400">
-                Default password is <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded font-mono text-indigo-600">admin</code>
-              </p>
             </div>
 
             {loginError && (

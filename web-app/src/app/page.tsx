@@ -91,7 +91,7 @@ export default function PrintKioskPage() {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
 
   const handleAdminLogin = (pw: string) => {
-    if (pw === 'admin' || pw === 'admin123' || pw === 'kiosk@2026' || pw === 'abhinav') {
+    if (pw === 'abhiraj444') {
       setIsAdmin(true);
       return true;
     }
