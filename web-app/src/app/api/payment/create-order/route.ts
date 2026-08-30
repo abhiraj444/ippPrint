@@ -1,16 +1,26 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Razorpay from 'razorpay';
 import { isRazorpayConfigured, getRazorpayKeyId } from '@/lib/razorpay';
+import { calculatePrintPrice } from '@/lib/pricing';
+import { getPricingRates } from '@/lib/pricing-server';
 
 export async function POST(req: NextRequest) {
   try {
-    const { amount, documentName, totalSheets } = await req.json();
+    const { amount, documentName, totalSheets, isColor, isDuplex } = await req.json();
 
-    if (!amount || amount <= 0) {
+    // Server-side authoritative price calculation using server active pricing rates
+    let finalAmount = amount;
+    if (typeof totalSheets === 'number' && totalSheets > 0) {
+      const serverRates = getPricingRates();
+      const serverCalculated = calculatePrintPrice(totalSheets, !!isColor, !!isDuplex, serverRates);
+      finalAmount = serverCalculated;
+    }
+
+    if (!finalAmount || finalAmount <= 0) {
       return NextResponse.json({ error: 'Invalid amount' }, { status: 400 });
     }
 
-    const amountInPaise = Math.round(amount * 100);
+    const amountInPaise = Math.round(finalAmount * 100);
 
     // If live Razorpay credentials are set, create live Razorpay order
     if (isRazorpayConfigured()) {
@@ -31,7 +41,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         orderId: order.id,
-        amount: amount,
+        amount: finalAmount,
         currency: order.currency,
         keyId: getRazorpayKeyId(),
         isMock: false,
@@ -42,7 +52,7 @@ export async function POST(req: NextRequest) {
     const mockOrderId = `order_mock_${Date.now()}`;
     return NextResponse.json({
       orderId: mockOrderId,
-      amount: amount,
+      amount: finalAmount,
       currency: 'INR',
       keyId: 'rzp_test_mock_mode',
       isMock: true,

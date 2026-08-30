@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const RELAY_URL = process.env.RELAY_WORKER_URL || 'https://relay-worker.abhinavip.workers.dev';
 
@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
       pdfBase64: body.pdfBase64,
       copies: body.copies || 1,
       duplex: body.duplex || 'simplex',
+      dpi: body.dpi || 150,
     };
 
     console.log(`[api/print] Forwarding print job "${payload.documentName}" (${Math.round(payload.pdfBase64.length * 0.75 / 1024)} KB) to ${RELAY_URL}/api/print`);

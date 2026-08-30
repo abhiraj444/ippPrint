@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Printer, Copy, RotateCcw, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Printer, Copy, RotateCcw, CheckCircle2, RefreshCw, Sparkles, Zap } from 'lucide-react';
 
 export interface PrinterInfo {
   slug: string;
@@ -16,6 +16,7 @@ export interface PrintJobSettings {
   duplex: 'simplex' | 'duplex' | 'duplexshort';
   pageRangeMode: 'all' | 'odd' | 'even' | 'custom';
   customPageRange: string;
+  dpi: 150 | 300;
 }
 
 interface PrintSettingsProps {
@@ -164,6 +165,58 @@ export function PrintSettings({
             <option value="duplex">Double-Sided (Flip on Long Edge)</option>
             <option value="duplexshort">Double-Sided (Flip on Short Edge / Tablet)</option>
           </select>
+        </div>
+      </div>
+
+      {/* Print Quality / DPI Resolution Selector */}
+      <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
+        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+          Print Quality / Resolution
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onChange({ dpi: 150 })}
+            className={`p-2.5 rounded-xl border text-left flex items-start gap-2.5 transition-all ${
+              (settings.dpi || 150) === 150
+                ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 ring-2 ring-indigo-600/20'
+                : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 bg-gray-50/50 dark:bg-gray-800/40'
+            }`}
+          >
+            <div className={`p-1.5 rounded-lg ${
+              (settings.dpi || 150) === 150
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+            }`}>
+              <Zap className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <p className="font-bold text-xs text-gray-900 dark:text-gray-100">150 DPI</p>
+              <p className="text-[10px] text-gray-500">Fast Standard RIP</p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onChange({ dpi: 300 })}
+            className={`p-2.5 rounded-xl border text-left flex items-start gap-2.5 transition-all ${
+              settings.dpi === 300
+                ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 ring-2 ring-indigo-600/20'
+                : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 bg-gray-50/50 dark:bg-gray-800/40'
+            }`}
+          >
+            <div className={`p-1.5 rounded-lg ${
+              settings.dpi === 300
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+            }`}>
+              <Sparkles className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <p className="font-bold text-xs text-gray-900 dark:text-gray-100">300 DPI</p>
+              <p className="text-[10px] text-gray-500">High Res / Photos</p>
+            </div>
+          </button>
         </div>
       </div>
     </div>

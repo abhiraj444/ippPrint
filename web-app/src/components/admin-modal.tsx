@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { PrinterInfo, PrintJobSettings } from '@/components/print-settings';
 
+import { PricingRates } from '@/lib/pricing';
+
 interface AdminModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -30,6 +32,8 @@ interface AdminModalProps {
   selectedPrinterSlug: string;
   onSelectPrinter: (slug: string) => void;
   agentConnected: boolean;
+  pricingRates: PricingRates;
+  onSavePricing: (rates: PricingRates) => Promise<boolean>;
 }
 
 export function AdminModal({
@@ -44,9 +48,20 @@ export function AdminModal({
   selectedPrinterSlug,
   onSelectPrinter,
   agentConnected,
+  pricingRates,
+  onSavePricing,
 }: AdminModalProps) {
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [editRates, setEditRates] = useState<PricingRates>(pricingRates);
+  const [isSavingPricing, setIsSavingPricing] = useState<boolean>(false);
+  const [pricingSuccessMsg, setPricingSuccessMsg] = useState<string | null>(null);
+  const [pricingErrorMsg, setPricingErrorMsg] = useState<string | null>(null);
+
+  // Sync editRates when pricingRates changes
+  React.useEffect(() => {
+    setEditRates(pricingRates);
+  }, [pricingRates]);
 
   if (!isOpen) return null;
 
@@ -191,7 +206,125 @@ export function AdminModal({
               </div>
             </div>
 
-            {/* 3. System Connection Diagnostics */}
+            {/* 3. Pricing Rates Configuration (Server-Side Print Rates) */}
+            <div className="p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-gray-700/60">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                    Print Pricing Rates (₹ per sheet)
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-400 font-medium">Server Synced</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                    B&W Single-Sided (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editRates.bwSimplex}
+                    onChange={(e) =>
+                      setEditRates((r) => ({ ...r, bwSimplex: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-xs font-bold text-gray-800 dark:text-gray-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                    B&W Double-Sided (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editRates.bwDuplex}
+                    onChange={(e) =>
+                      setEditRates((r) => ({ ...r, bwDuplex: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-xs font-bold text-gray-800 dark:text-gray-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                    Color Single-Sided (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editRates.colorSimplex}
+                    onChange={(e) =>
+                      setEditRates((r) => ({ ...r, colorSimplex: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-xs font-bold text-gray-800 dark:text-gray-200"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                    Color Double-Sided (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    value={editRates.colorDuplex}
+                    onChange={(e) =>
+                      setEditRates((r) => ({ ...r, colorDuplex: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-xs font-bold text-gray-800 dark:text-gray-200"
+                  />
+                </div>
+              </div>
+
+              {pricingSuccessMsg && (
+                <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-[11px] font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{pricingSuccessMsg}</span>
+                </div>
+              )}
+
+              {pricingErrorMsg && (
+                <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-[11px] font-semibold flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{pricingErrorMsg}</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={isSavingPricing}
+                onClick={async () => {
+                  try {
+                    setIsSavingPricing(true);
+                    setPricingSuccessMsg(null);
+                    setPricingErrorMsg(null);
+                    const ok = await onSavePricing(editRates);
+                    if (ok) {
+                      setPricingSuccessMsg('Server print pricing updated successfully!');
+                    } else {
+                      setPricingErrorMsg('Failed to update pricing on server.');
+                    }
+                  } catch (err: any) {
+                    setPricingErrorMsg(err.message || 'Error saving pricing rates');
+                  } finally {
+                    setIsSavingPricing(false);
+                  }
+                }}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+              >
+                {isSavingPricing ? 'Saving Pricing to Server...' : 'Save New Print Rates'}
+              </button>
+            </div>
+
+            {/* 4. System Connection Diagnostics */}
             <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60 space-y-2 text-xs">
               <div className="flex justify-between items-center">
                 <span className="text-gray-500">Laptop Spooler Agent:</span>

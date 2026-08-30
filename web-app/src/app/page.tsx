@@ -8,6 +8,7 @@ import { PageGrid } from '@/components/page-grid';
 import { PaymentModal } from '@/components/payment-modal';
 import { AdminModal } from '@/components/admin-modal';
 import { NupOptions, imageToPdf, applyNupLayout } from '@/lib/pdf-processor';
+import { PricingRates, DEFAULT_RATES, getRatePerSheet } from '@/lib/pricing';
 import { PDFDocument } from 'pdf-lib';
 import {
   Printer,
@@ -73,14 +74,55 @@ export default function PrintKioskPage() {
     duplex: 'simplex',
     pageRangeMode: 'all',
     customPageRange: '',
+    dpi: 150,
   });
 
-  // 3. Printers & Connectivity
+  // 3. Server Pricing Rates
+  const [pricingRates, setPricingRates] = useState<PricingRates>(DEFAULT_RATES);
+
+  const loadPricing = useCallback(async () => {
+    try {
+      const res = await fetch('/api/pricing');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rates) {
+          setPricingRates(data.rates);
+        }
+      }
+    } catch (err) {
+      console.warn('[Pricing] Failed to load server pricing rates:', err);
+    }
+  }, []);
+
+  const handleSavePricing = async (newRates: PricingRates): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/pricing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminPassword: 'abhiraj444',
+          rates: newRates,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rates) {
+          setPricingRates(data.rates);
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // 4. Printers & Connectivity
   const [printers, setPrinters] = useState<PrinterInfo[]>([]);
   const [isLoadingPrinters, setIsLoadingPrinters] = useState<boolean>(true);
   const [agentConnected, setAgentConnected] = useState<boolean>(true);
 
-  // 4. UI, Printing, & Modals state
+  // 5. UI, Printing, & Modals state
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState<boolean>(false);
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [printProgressText, setPrintProgressText] = useState<string | null>(null);
@@ -147,11 +189,12 @@ export default function PrintKioskPage() {
 
   useEffect(() => {
     loadPrinters(true);
+    loadPricing();
     const interval = setInterval(() => {
       loadPrinters(false);
     }, 10000);
     return () => clearInterval(interval);
-  }, [loadPrinters]);
+  }, [loadPrinters, loadPricing]);
 
   // Handle uploaded files (all processed and queued together)
   const handleFilesAdded = async (fileList: FileList | File[]) => {
@@ -345,7 +388,7 @@ export default function PrintKioskPage() {
   const selectedPrinter = printers.find((p) => p.slug === printSettings.printerSlug);
   const isColorPrinter = selectedPrinter ? selectedPrinter.isColor : false;
   const isDuplexMode = printSettings.duplex !== 'simplex';
-  const ratePerSheet = isColorPrinter ? 10.0 : isDuplexMode ? 3.0 : 2.0;
+  const ratePerSheet = getRatePerSheet(isColorPrinter, isDuplexMode, pricingRates);
   const totalAmount = Math.max(1, Math.round(totalPrintSheets * ratePerSheet));
 
   // Dispatch Sequential Print Execution
@@ -367,10 +410,10 @@ export default function PrintKioskPage() {
         const sortedSelected = Array.from(doc.selectedPages).sort((a, b) => a - b);
         const sortedInverted = Array.from(doc.invertedPages).sort((a, b) => a - b);
 
-        // Generate print document for this specific file with its exact clean filename
+        // Generate print document for this specific file with its exact clean filename and selected DPI
         const { pdfBytes: printBytes } = await applyNupLayout(
           doc.pdfBytes,
-          doc.nupOptions,
+          { ...doc.nupOptions, dpi: printSettings.dpi || 150 },
           doc.name,
           sortedSelected,
           sortedInverted
@@ -389,6 +432,7 @@ export default function PrintKioskPage() {
           pdfBase64,
           copies: printSettings.copies,
           duplex: printSettings.duplex,
+          dpi: printSettings.dpi || 150,
         };
 
         let res: Response;
@@ -994,6 +1038,7 @@ export default function PrintKioskPage() {
         isDuplex={isDuplexMode}
         onPaymentSuccess={executePrint}
         isPrinting={isPrinting}
+        pricingRates={pricingRates}
       />
 
       {/* Password-Protected Admin Portal Modal */}
@@ -1009,6 +1054,8 @@ export default function PrintKioskPage() {
         selectedPrinterSlug={printSettings.printerSlug}
         onSelectPrinter={(slug) => setPrintSettings((s) => ({ ...s, printerSlug: slug }))}
         agentConnected={agentConnected}
+        pricingRates={pricingRates}
+        onSavePricing={handleSavePricing}
       />
     </main>
   );

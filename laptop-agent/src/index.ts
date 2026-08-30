@@ -68,9 +68,10 @@ async function main() {
         const pdfBuffer = Buffer.from(payload.pdfBase64, 'base64');
         const jobId = nextRestJobId++;
         const docName = payload.documentName || `Document-${jobId}.pdf`;
+        const requestedDpi = payload.dpi ? parseInt(String(payload.dpi), 10) : undefined;
 
-        console.log(`[agent] Spooling REST print job ${jobId} "${docName}" (${pdfBuffer.length} bytes) to "${printer.displayName}"`);
-        printDocument(printer.localName, pdfBuffer, jobId, docName).catch(console.error);
+        console.log(`[agent] Spooling REST print job ${jobId} "${docName}" (${pdfBuffer.length} bytes, ${requestedDpi || 150} DPI) to "${printer.displayName}"`);
+        printDocument(printer.localName, pdfBuffer, jobId, docName, requestedDpi).catch(console.error);
 
         client.sendResponse(req.requestId, 200, { 'Content-Type': 'application/json' }, Buffer.from(JSON.stringify({
           success: true,

@@ -10,6 +10,7 @@ export interface NupOptions {
   marginPt: number; // margin in points (default: 20)
   gutterPt: number; // space between slots in points (default: 10)
   paperSize: 'A4' | 'Letter' | 'Legal';
+  dpi?: number; // 150 or 300 (default: 150)
 }
 
 const PAPER_DIMENSIONS: Record<string, [number, number]> = {
@@ -227,7 +228,15 @@ export async function applyNupLayout(
   selectedPageIndices?: number[],
   invertedPageIndices?: number[]
 ): Promise<{ pdfBytes: Uint8Array; totalSheets: number }> {
-  const { nup = 1, orientation = 'auto', drawBorders = true, marginPt = 20, gutterPt = 10, paperSize = 'A4' } = options;
+  const {
+    nup = 1,
+    orientation = 'auto',
+    drawBorders = true,
+    marginPt = 20,
+    gutterPt = 10,
+    paperSize = 'A4',
+    dpi = 150,
+  } = options;
 
   const pdfjsLib = await import('pdfjs-dist');
   pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
@@ -304,8 +313,9 @@ export async function applyNupLayout(
   const slotsPerPage = rows * cols;
   const totalSheets = Math.ceil(filteredIndices.length / slotsPerPage);
 
-  // Render scale factor for fast 150 DPI print quality (150 DPI / 72 PT = 2.083)
-  const renderScale = 150 / 72;
+  // Render scale factor for requested DPI print quality (DPI / 72 PT)
+  const targetDpi = dpi || 150;
+  const renderScale = targetDpi / 72;
 
   const usableW = (sheetW - 2 * marginPt - (cols - 1) * gutterPt) * renderScale;
   const usableH = (sheetH - 2 * marginPt - (rows - 1) * gutterPt) * renderScale;
@@ -341,8 +351,9 @@ export async function applyNupLayout(
       const cellY = marginPt * renderScale + r * (cellH + gutterPt * renderScale);
 
       // Render miniature page to its own canvas
+      // Shrink-to-fit only: If larger than cell, scale down. If smaller, keep 100% original scale (renderScale).
       const unscaledViewport = page.getViewport({ scale: 1.0 });
-      const fitScale = Math.min(cellW / unscaledViewport.width, cellH / unscaledViewport.height);
+      const fitScale = Math.min(cellW / unscaledViewport.width, cellH / unscaledViewport.height, renderScale);
       const viewport = page.getViewport({ scale: fitScale });
 
       const pageCanvas = document.createElement('canvas');

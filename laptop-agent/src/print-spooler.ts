@@ -98,8 +98,11 @@ export async function printDocument(
   printerName: string,
   data: Buffer,
   jobId: number,
-  documentName: string = `Job-${jobId}`
+  documentName: string = `Job-${jobId}`,
+  dpi: number = RASTER_DPI
 ): Promise<void> {
+  const targetDpi = dpi || RASTER_DPI || 150;
+
   // Sanitize document name for valid Windows filename & print job title
   const cleanName = (documentName || `Job-${jobId}`)
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
@@ -127,12 +130,12 @@ export async function printDocument(
 
   try {
     await fs.writeFile(tempFile, data);
-    console.log(`[printer] Saved job ${jobId} "${fileName}" (${data.length} bytes) to ${tempFile}`);
+    console.log(`[printer] Saved job ${jobId} "${fileName}" (${data.length} bytes, ${targetDpi} DPI) to ${tempFile}`);
 
-    // If PRINT_AS_IMAGE is enabled, rasterize the PDF to 150 DPI images before sending to printer
+    // If PRINT_AS_IMAGE is enabled, rasterize the PDF to target DPI images before sending to printer
     if (PRINT_AS_IMAGE) {
       const isColor = isColorPrinter(printerName);
-      const success = await rasterizePdf(tempFile, rasterFile, RASTER_DPI, isColor);
+      const success = await rasterizePdf(tempFile, rasterFile, targetDpi, isColor);
       if (success && fsSync.existsSync(rasterFile)) {
         // Re-embed title in rasterized PDF as well
         try {
@@ -167,8 +170,8 @@ export async function printDocument(
           const psPath = psScript.replace(/\\/g, '/');
           const jobDirPath = jobDir.replace(/\\/g, '/');
 
-          console.log(`[printer] Rasterizing to PNG (${device} @ ${RASTER_DPI} DPI) for native Windows spooler...`);
-          const gsCmd = `"${gsPath}" -dNOPAUSE -dBATCH -dQUIET -sDEVICE=${device} -r${RASTER_DPI} "-sOutputFile=${outPattern}" "${gsInput}"`;
+          console.log(`[printer] Rasterizing to PNG (${device} @ ${targetDpi} DPI) for native Windows spooler...`);
+          const gsCmd = `"${gsPath}" -dNOPAUSE -dBATCH -dQUIET -sDEVICE=${device} -r${targetDpi} "-sOutputFile=${outPattern}" "${gsInput}"`;
           await execAsync(gsCmd, { windowsHide: true });
 
           const imageFiles = fsSync.readdirSync(jobDir)

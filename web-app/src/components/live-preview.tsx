@@ -107,8 +107,9 @@ export function LivePreview({
           const cellX = margin + c * (cellW + gutter);
           const cellY = margin + r * (cellH + gutter);
 
+          // Shrink-to-fit only: If larger than cell, scale down. If smaller, keep 100% original scale (previewScale).
           const unscaled = page.getViewport({ scale: 1.0 });
-          const fit = Math.min(cellW / unscaled.width, cellH / unscaled.height);
+          const fit = Math.min(cellW / unscaled.width, cellH / unscaled.height, previewScale);
           const viewport = page.getViewport({ scale: fit });
 
           const pCanvas = document.createElement('canvas');

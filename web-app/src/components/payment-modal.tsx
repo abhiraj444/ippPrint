@@ -1,7 +1,8 @@
-﻿'use client';
+'use client';
 
 import React, { useState } from 'react';
 import { CreditCard, CheckCircle2, ShieldCheck, Printer, AlertTriangle, X, Sparkles } from 'lucide-react';
+import { PricingRates, getRatePerSheet } from '@/lib/pricing';
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface PaymentModalProps {
   isDuplex: boolean;
   onPaymentSuccess: () => Promise<void>;
   isPrinting: boolean;
+  pricingRates?: PricingRates;
 }
 
 export function PaymentModal({
@@ -27,6 +29,7 @@ export function PaymentModal({
   isDuplex,
   onPaymentSuccess,
   isPrinting,
+  pricingRates,
 }: PaymentModalProps) {
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -36,7 +39,7 @@ export function PaymentModal({
 
   // Pricing calculation
   const totalPrintSheets = totalSheets * copies;
-  const ratePerSheet = isColor ? 10.0 : isDuplex ? 3.0 : 2.0;
+  const ratePerSheet = getRatePerSheet(isColor, isDuplex, pricingRates);
   const totalAmount = Math.max(1, Math.round(totalPrintSheets * ratePerSheet));
 
   const handlePayAndPrint = async () => {
@@ -52,6 +55,8 @@ export function PaymentModal({
           amount: totalAmount,
           documentName,
           totalSheets: totalPrintSheets,
+          isColor,
+          isDuplex,
         }),
       });
 
