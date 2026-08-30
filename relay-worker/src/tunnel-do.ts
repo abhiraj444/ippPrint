@@ -34,6 +34,61 @@ export class TunnelDO extends DurableObject {
       });
     }
 
+    // Handle global pricing storage inside Durable Object (Accessible 24/7 across all users)
+    const url = new URL(request.url);
+    if (url.pathname === '/api/pricing' || url.pathname === '/api/pricing/') {
+      if (request.method === 'GET') {
+        const saved: any = await this.ctx.storage.get('pricing');
+        const rates = saved || {
+          bwSimplex: 2.0,
+          bwDuplex: 3.0,
+          colorSimplex: 10.0,
+          colorDuplex: 15.0,
+        };
+        return new Response(JSON.stringify({ success: true, rates }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (request.method === 'POST') {
+        try {
+          const body: any = await request.json();
+          const expectedPassword = 'abhiraj444';
+          if (!body.adminPassword || body.adminPassword !== expectedPassword) {
+            return new Response(JSON.stringify({ error: 'Unauthorized: Invalid admin password' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          if (!body.rates || typeof body.rates !== 'object') {
+            return new Response(JSON.stringify({ error: 'Invalid rates payload' }), {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+
+          const rates = {
+            bwSimplex: Number(body.rates.bwSimplex) >= 0 ? Number(body.rates.bwSimplex) : 2.0,
+            bwDuplex: Number(body.rates.bwDuplex) >= 0 ? Number(body.rates.bwDuplex) : 3.0,
+            colorSimplex: Number(body.rates.colorSimplex) >= 0 ? Number(body.rates.colorSimplex) : 10.0,
+            colorDuplex: Number(body.rates.colorDuplex) >= 0 ? Number(body.rates.colorDuplex) : 15.0,
+          };
+
+          await this.ctx.storage.put('pricing', rates);
+          return new Response(
+            JSON.stringify({ success: true, message: 'Pricing updated successfully', rates }),
+            { headers: { 'Content-Type': 'application/json' } }
+          );
+        } catch (e: any) {
+          return new Response(JSON.stringify({ error: e.message || 'Server error' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      }
+    }
+
     // Handle regular HTTP requests to be tunneled
     if (!this.agentSocket) {
       return new Response('Bad Gateway: No agent connected', { status: 502 });

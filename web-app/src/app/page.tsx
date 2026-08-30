@@ -82,7 +82,12 @@ export default function PrintKioskPage() {
 
   const loadPricing = useCallback(async () => {
     try {
-      const res = await fetch('/api/pricing');
+      let res: Response;
+      try {
+        res = await fetch('https://relay-worker.abhinavip.workers.dev/api/pricing', { cache: 'no-store' });
+      } catch {
+        res = await fetch('/api/pricing', { cache: 'no-store' });
+      }
       if (res.ok) {
         const data = await res.json();
         if (data.rates) {
@@ -96,22 +101,46 @@ export default function PrintKioskPage() {
 
   const handleSavePricing = async (newRates: PricingRates): Promise<boolean> => {
     try {
-      const res = await fetch('/api/pricing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          adminPassword: 'abhiraj444',
-          rates: newRates,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.rates) {
-          setPricingRates(data.rates);
+      const payload = {
+        adminPassword: 'abhiraj444',
+        rates: newRates,
+      };
+
+      let success = false;
+      try {
+        const res = await fetch('https://relay-worker.abhinavip.workers.dev/api/pricing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.rates) {
+            setPricingRates(data.rates);
+            success = true;
+          }
         }
-        return true;
+      } catch (relayErr) {
+        console.warn('[Pricing] Relay POST warning:', relayErr);
       }
-      return false;
+
+      // Also sync to local api
+      try {
+        const localRes = await fetch('/api/pricing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (localRes.ok && !success) {
+          const localData = await localRes.json();
+          if (localData.rates) {
+            setPricingRates(localData.rates);
+            success = true;
+          }
+        }
+      } catch {}
+
+      return success;
     } catch {
       return false;
     }
@@ -192,6 +221,7 @@ export default function PrintKioskPage() {
     loadPricing();
     const interval = setInterval(() => {
       loadPrinters(false);
+      loadPricing();
     }, 10000);
     return () => clearInterval(interval);
   }, [loadPrinters, loadPricing]);
