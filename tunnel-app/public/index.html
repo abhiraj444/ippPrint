@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>One-Click Cloudflare Tunnel & Share</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(16px); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+  <!-- Top Bar -->
+  <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-8 py-3.5 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25">
+        <i data-lucide="radio" class="w-5 h-5 animate-pulse"></i>
+      </div>
+      <div>
+        <h1 class="text-sm sm:text-base font-extrabold text-white tracking-tight flex items-center gap-2">
+          <span>One-Click Cloudflare Tunnel</span>
+          <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full font-bold border border-indigo-500/30">v1.0</span>
+        </h1>
+        <p class="text-xs text-slate-400">Expose any local port or share folders with instant QR code</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2.5">
+      <div id="topStatusBadge" class="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-400">
+        <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+        <span>Idle</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Dashboard Container -->
+  <main class="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-8 space-y-6">
+
+    <!-- Cloudflared Downloading Banner (Visible only when downloading binary) -->
+    <div id="downloadBanner" class="hidden bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 border border-amber-500/30 rounded-2xl p-4 sm:p-5 flex items-center gap-4">
+      <div class="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center flex-shrink-0 animate-spin">
+        <i data-lucide="loader-2" class="w-5 h-5"></i>
+      </div>
+      <div class="space-y-1 flex-1">
+        <h3 class="text-sm font-bold text-amber-300">Setting up Cloudflare Tunnel Engine...</h3>
+        <p id="downloadProgressText" class="text-xs text-amber-200/80">Downloading official cloudflared binary (one-time setup)...</p>
+        <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden mt-2">
+          <div id="downloadProgressBar" class="bg-amber-400 h-full w-1/3 transition-all duration-300"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN CONFIGURATION CARD (When Tunnel is Stopped) -->
+    <div id="configCard" class="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-8 shadow-2xl space-y-6">
+      <!-- Mode Tabs (Port Mode vs File Share Mode) -->
+      <div class="grid grid-cols-2 gap-2 bg-slate-950/80 p-1.5 rounded-2xl border border-slate-800">
+        <button
+          id="tabPort"
+          onclick="setMode('port')"
+          class="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+        >
+          <i data-lucide="network" class="w-4 h-4"></i>
+          <span>Expose Local Port / Server</span>
+        </button>
+        <button
+          id="tabFolder"
+          onclick="setMode('folder')"
+          class="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-400 hover:text-white"
+        >
+          <i data-lucide="folder-kanban" class="w-4 h-4"></i>
+          <span>Share Local Folder / Files</span>
+        </button>
+      </div>
+
+      <!-- PORT MODE SECTION -->
+      <div id="sectionPort" class="space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-300 uppercase tracking-wider">Local Port Number</label>
+            <button onclick="scanLocalPorts()" class="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1">
+              <i data-lucide="scan" class="w-3.5 h-3.5"></i>
+              <span>Scan Active Ports</span>
+            </button>
+          </div>
+          <div class="relative">
+            <div class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-mono text-sm">http://localhost:</div>
+            <input
+              type="number"
+              id="inputPort"
+              value="3000"
+              placeholder="3000"
+              class="w-full bg-slate-950 border border-slate-700/80 rounded-2xl pl-36 pr-4 py-3.5 text-white font-mono font-bold text-base sm:text-lg focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
+        </div>
+
+        <!-- Quick Presets -->
+        <div class="space-y-2">
+          <label class="text-xs font-semibold text-slate-400">Quick Common Presets:</label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="setPort(3000)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-all">
+              Next.js / React (3000)
+            </button>
+            <button onclick="setPort(5173)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-all">
+              Vite (5173)
+            </button>
+            <button onclick="setPort(5000)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-all">
+              Flask / Python (5000)
+            </button>
+            <button onclick="setPort(8000)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-all">
+              Django / FastAPI (8000)
+            </button>
+            <button onclick="setPort(8080)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-all">
+              HTTP Server (8080)
+            </button>
+          </div>
+        </div>
+
+        <!-- Active Scanned Ports Container (Populated when user scans) -->
+        <div id="scannedPortsContainer" class="hidden bg-slate-950/60 border border-slate-800 rounded-2xl p-3.5 space-y-2">
+          <div class="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+            <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Active servers detected on your laptop:</span>
+          </div>
+          <div id="scannedPortsList" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+
+      <!-- FOLDER SHARE MODE SECTION -->
+      <div id="sectionFolder" class="hidden space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold text-slate-300 uppercase tracking-wider">Folder Path on Laptop</label>
+            <span class="text-xs text-slate-400">Full directory path to share</span>
+          </div>
+          <div class="relative">
+            <i data-lucide="folder" class="w-5 h-5 text-amber-400 absolute left-4 top-1/2 -translate-y-1/2"></i>
+            <input
+              type="text"
+              id="inputFolder"
+              placeholder="e.g. C:\Users\lenovo\Downloads or D:\Projects"
+              class="w-full bg-slate-950 border border-slate-700/80 rounded-2xl pl-12 pr-4 py-3.5 text-white font-mono text-xs sm:text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
+        </div>
+
+        <!-- Quick Folder Presets -->
+        <div class="space-y-2">
+          <label class="text-xs font-semibold text-slate-400">Quick System Folders:</label>
+          <div id="quickFolderList" class="flex items-center gap-2 flex-wrap">
+            <!-- Injected dynamically on load (Downloads, Documents, Desktop, etc.) -->
+          </div>
+        </div>
+      </div>
+
+      <!-- LAUNCH BUTTON -->
+      <div class="pt-2">
+        <button
+          id="btnStart"
+          onclick="startTunnel()"
+          class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-extrabold text-base shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-3 transition-all hover:scale-[1.01] active:scale-[0.99]"
+        >
+          <i data-lucide="zap" class="w-5 h-5 fill-white"></i>
+          <span>Launch Public Cloudflare Tunnel & Generate QR</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ACTIVE TUNNEL CARD (Visible When Tunnel is Live) -->
+    <div id="activeCard" class="hidden bg-slate-900/90 border border-indigo-500/40 rounded-3xl p-5 sm:p-8 shadow-2xl shadow-indigo-500/10 space-y-6">
+      <!-- Header with Live Indicator -->
+      <div class="flex items-center justify-between flex-wrap gap-3 pb-4 border-b border-slate-800">
+        <div class="flex items-center gap-3">
+          <span class="relative flex h-3.5 w-3.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+          </span>
+          <div>
+            <h2 class="text-base sm:text-lg font-extrabold text-white flex items-center gap-2">
+              <span>Tunnel is LIVE Globally</span>
+              <span id="activeModeBadge" class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Port 3000</span>
+            </h2>
+            <p id="activeTargetText" class="text-xs text-slate-400">Forwarding traffic to http://localhost:3000</p>
+          </div>
+        </div>
+
+        <button
+          onclick="stopTunnel()"
+          class="px-4 py-2 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 hover:text-red-300 font-bold text-xs flex items-center gap-2 transition-all"
+        >
+          <i data-lucide="power" class="w-4 h-4"></i>
+          <span>Stop Tunnel</span>
+        </button>
+      </div>
+
+      <!-- Grid Layout: QR Code on Left, Link & Share Options on Right -->
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+        <!-- QR Code Block -->
+        <div class="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-950/80 rounded-3xl border border-slate-800 space-y-3">
+          <div class="p-3 bg-white rounded-2xl shadow-xl flex items-center justify-center">
+            <img id="qrImage" src="" alt="Scan with Phone Camera" class="w-48 h-48 sm:w-56 sm:h-56 object-contain" />
+          </div>
+          <div class="text-center space-y-1">
+            <div class="flex items-center justify-center gap-1.5 text-xs font-bold text-slate-200">
+              <i data-lucide="smartphone" class="w-4 h-4 text-indigo-400"></i>
+              <span>Point Phone Camera to Open</span>
+            </div>
+            <p class="text-[11px] text-slate-500">No typing or app installation needed</p>
+          </div>
+        </div>
+
+        <!-- Links & Share Actions -->
+        <div class="md:col-span-7 space-y-4">
+          <!-- Public URL Box -->
+          <div class="space-y-2">
+            <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Public HTTPS Address</label>
+            <div class="flex items-center gap-2 bg-slate-950 border border-slate-700/80 rounded-2xl p-2.5 sm:p-3">
+              <i data-lucide="globe" class="w-5 h-5 text-indigo-400 flex-shrink-0 ml-1"></i>
+              <input
+                type="text"
+                id="activeUrlInput"
+                readonly
+                value=""
+                class="bg-transparent text-indigo-300 font-mono font-bold text-xs sm:text-sm flex-1 outline-none truncate"
+              />
+              <button
+                onclick="copyActiveUrl()"
+                id="btnCopyUrl"
+                class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-lg shadow-indigo-600/30 flex-shrink-0"
+              >
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                <span id="copyText">Copy</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quick Open in Browser Button -->
+          <div class="grid grid-cols-2 gap-3">
+            <a
+              id="btnOpenUrl"
+              href="#"
+              target="_blank"
+              class="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all"
+            >
+              <i data-lucide="external-link" class="w-4 h-4 text-indigo-400"></i>
+              <span>Open in Browser</span>
+            </a>
+            <button
+              onclick="downloadQrCode()"
+              class="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all"
+            >
+              <i data-lucide="download" class="w-4 h-4 text-indigo-400"></i>
+              <span>Save QR Code</span>
+            </button>
+          </div>
+
+          <!-- Share Shortcuts (WhatsApp / Telegram) -->
+          <div class="p-3.5 bg-slate-950/60 rounded-2xl border border-slate-800 flex items-center justify-between flex-wrap gap-2">
+            <span class="text-xs font-semibold text-slate-400">Share Link Instantly:</span>
+            <div class="flex items-center gap-2">
+              <button
+                onclick="shareWhatsApp()"
+                class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/30 text-emerald-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+              >
+                <i data-lucide="message-circle" class="w-3.5 h-3.5"></i>
+                <span>WhatsApp</span>
+              </button>
+              <button
+                onclick="shareTelegram()"
+                class="px-3 py-1.5 rounded-xl bg-sky-600/20 hover:bg-sky-600 border border-sky-500/30 text-sky-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+              >
+                <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                <span>Telegram</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE REQUEST & TRAFFIC LOGS -->
+    <div class="bg-slate-900/60 border border-slate-800 rounded-3xl p-5 sm:p-6 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="text-xs sm:text-sm font-bold text-slate-300 flex items-center gap-2">
+          <i data-lucide="terminal" class="w-4 h-4 text-indigo-400"></i>
+          <span>Live Activity & Traffic Logs</span>
+        </h3>
+        <button onclick="clearLogs()" class="text-[11px] text-slate-500 hover:text-slate-400">Clear</button>
+      </div>
+
+      <div
+        id="logsConsole"
+        class="h-44 overflow-y-auto bg-slate-950 p-4 rounded-2xl border border-slate-850 font-mono text-xs text-slate-400 space-y-1.5 select-text"
+      >
+        <div class="text-slate-600 italic">[Waiting for tunnel startup...]</div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="border-t border-slate-850 py-4 text-center text-xs text-slate-500">
+    Built with Cloudflare Quick Tunnels • Zero-Config • Secure
+  </footer>
+
+  <script>
+    let currentMode = 'port';
+    let ws = null;
+    let activeTunnelUrl = '';
+
+    function setMode(mode) {
+      currentMode = mode;
+      const tabPort = document.getElementById('tabPort');
+      const tabFolder = document.getElementById('tabFolder');
+      const secPort = document.getElementById('sectionPort');
+      const secFolder = document.getElementById('sectionFolder');
+
+      if (mode === 'port') {
+        tabPort.className = 'flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all bg-indigo-600 text-white shadow-lg shadow-indigo-600/30';
+        tabFolder.className = 'flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-400 hover:text-white';
+        secPort.classList.remove('hidden');
+        secFolder.classList.add('hidden');
+      } else {
+        tabFolder.className = 'flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all bg-indigo-600 text-white shadow-lg shadow-indigo-600/30';
+        tabPort.className = 'flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-400 hover:text-white';
+        secFolder.classList.remove('hidden');
+        secPort.classList.add('hidden');
+      }
+    }
+
+    function setPort(p) {
+      document.getElementById('inputPort').value = p;
+    }
+
+    async function loadQuickFolders() {
+      try {
+        const res = await fetch('/api/system-folders');
+        if (!res.ok) return;
+        const data = await res.json();
+        const container = document.getElementById('quickFolderList');
+        if (data.folders && data.folders.length > 0) {
+          container.innerHTML = data.folders.map(f => `
+            <button onclick="document.getElementById('inputFolder').value = '${f.path.replace(/\\/g, '\\\\')}'" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-all flex items-center gap-1.5">
+              <i data-lucide="${f.icon || 'folder'}" class="w-3.5 h-3.5 text-amber-400"></i>
+              <span>${f.name}</span>
+            </button>
+          `).join('');
+          // Default to first folder if empty
+          if (!document.getElementById('inputFolder').value && data.folders[0]) {
+            document.getElementById('inputFolder').value = data.folders[0].path;
+          }
+          lucide.createIcons();
+        }
+      } catch (e) {}
+    }
+
+    async function scanLocalPorts() {
+      const btn = event.target;
+      addLog('Scanning local machine for active listening ports...');
+      try {
+        const res = await fetch('/api/detect-ports');
+        const data = await res.json();
+        const container = document.getElementById('scannedPortsContainer');
+        const list = document.getElementById('scannedPortsList');
+
+        if (data.ports && data.ports.length > 0) {
+          container.classList.remove('hidden');
+          list.innerHTML = data.ports.map(p => `
+            <button onclick="setPort(${p.port})" class="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 transition-all">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span>Port ${p.port} (${p.label || 'Active'})</span>
+            </button>
+          `).join('');
+          addLog(`Found ${data.ports.length} active local port(s): ${data.ports.map(p => p.port).join(', ')}`);
+        } else {
+          container.classList.remove('hidden');
+          list.innerHTML = `<span class="text-xs text-slate-500">No active ports detected on standard ranges (3000-9000). You can enter any custom port above!</span>`;
+          addLog('No common open ports detected.');
+        }
+      } catch (err) {
+        addLog('Port scan failed: ' + err.message);
+      }
+    }
+
+    async function startTunnel() {
+      const btn = document.getElementById('btnStart');
+      btn.disabled = true;
+      btn.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i><span>Initiating Cloudflare Tunnel...</span>`;
+      lucide.createIcons();
+
+      const payload = {
+        mode: currentMode,
+        port: parseInt(document.getElementById('inputPort').value, 10) || 3000,
+        folderPath: document.getElementById('inputFolder').value.trim()
+      };
+
+      try {
+        const res = await fetch('/api/tunnel/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert('Failed to start tunnel: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Network error starting tunnel: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i data-lucide="zap" class="w-5 h-5 fill-white"></i><span>Launch Public Cloudflare Tunnel & Generate QR</span>`;
+        lucide.createIcons();
+      }
+    }
+
+    async function stopTunnel() {
+      try {
+        await fetch('/api/tunnel/stop', { method: 'POST' });
+      } catch (e) {
+        console.error('Stop tunnel error:', e);
+      }
+    }
+
+    function updateUiState(state) {
+      const configCard = document.getElementById('configCard');
+      const activeCard = document.getElementById('activeCard');
+      const topBadge = document.getElementById('topStatusBadge');
+
+      if (state.isActive && state.url) {
+        activeTunnelUrl = state.url;
+        configCard.classList.add('hidden');
+        activeCard.classList.remove('hidden');
+
+        document.getElementById('activeUrlInput').value = state.url;
+        document.getElementById('btnOpenUrl').href = state.url;
+        document.getElementById('qrImage').src = state.qrCodeDataUrl || '';
+        document.getElementById('activeModeBadge').textContent = state.mode === 'port' ? `Port ${state.port}` : 'Folder Share';
+        document.getElementById('activeTargetText').textContent = state.mode === 'port'
+          ? `Forwarding traffic to http://localhost:${state.port}`
+          : `Sharing folder: ${state.folderPath}`;
+
+        topBadge.innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span class="text-emerald-300">Live Online</span>
+        `;
+        topBadge.className = 'flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-xs font-semibold';
+      } else {
+        activeTunnelUrl = '';
+        activeCard.classList.add('hidden');
+        configCard.classList.remove('hidden');
+
+        topBadge.innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+          <span>Idle</span>
+        `;
+        topBadge.className = 'flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-400';
+      }
+
+      // Handle download banner
+      const banner = document.getElementById('downloadBanner');
+      if (state.isDownloadingBinary) {
+        banner.classList.remove('hidden');
+        document.getElementById('downloadProgressText').textContent = state.downloadStatusText || 'Downloading cloudflared binary...';
+        document.getElementById('downloadProgressBar').style.width = `${state.downloadPercent || 20}%`;
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+
+    function addLog(msg) {
+      const consoleEl = document.getElementById('logsConsole');
+      const div = document.createElement('div');
+      const time = new Date().toLocaleTimeString();
+      div.className = 'text-xs text-slate-300';
+      div.innerHTML = `<span class="text-slate-500">[${time}]</span> ${escapeHtml(msg)}`;
+      consoleEl.appendChild(div);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    function clearLogs() {
+      document.getElementById('logsConsole').innerHTML = '';
+    }
+
+    function copyActiveUrl() {
+      if (!activeTunnelUrl) return;
+      navigator.clipboard.writeText(activeTunnelUrl);
+      const copyText = document.getElementById('copyText');
+      copyText.textContent = 'Copied!';
+      setTimeout(() => { copyText.textContent = 'Copy'; }, 2000);
+    }
+
+    function downloadQrCode() {
+      const qrImg = document.getElementById('qrImage');
+      if (!qrImg.src) return;
+      const a = document.createElement('a');
+      a.href = qrImg.src;
+      a.download = 'cloudflare-tunnel-qr.png';
+      a.click();
+    }
+
+    function shareWhatsApp() {
+      if (!activeTunnelUrl) return;
+      const text = encodeURIComponent(`Here is the live link to my project/files: ${activeTunnelUrl}`);
+      window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+    }
+
+    function shareTelegram() {
+      if (!activeTunnelUrl) return;
+      const text = encodeURIComponent(`Here is the live link: ${activeTunnelUrl}`);
+      window.open(`https://t.me/share/url?url=${encodeURIComponent(activeTunnelUrl)}&text=${text}`, '_blank');
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+    }
+
+    function connectWs() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'state') {
+            updateUiState(msg.state);
+          } else if (msg.type === 'log') {
+            addLog(msg.text);
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        setTimeout(connectWs, 2000);
+      };
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      lucide.createIcons();
+      loadQuickFolders();
+      connectWs();
+
+      // Initial state fetch
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        updateUiState(data);
+      } catch (e) {}
+    });
+  </script>
+</body>
+</html>

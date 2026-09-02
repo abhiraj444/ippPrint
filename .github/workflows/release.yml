@@ -1,0 +1,99 @@
+name: Build & Release One-Click Tunnel App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'tunnel-app/package-lock.json'
+
+      - name: Install Dependencies
+        working-directory: ./tunnel-app
+        run: npm ci
+
+      - name: Package Windows Portable Release
+        run: |
+          mkdir -p dist/OneClickTunnel-windows
+          cp -r tunnel-app/server.js dist/OneClickTunnel-windows/
+          cp -r tunnel-app/package.json dist/OneClickTunnel-windows/
+          cp -r tunnel-app/package-lock.json dist/OneClickTunnel-windows/
+          cp -r tunnel-app/public dist/OneClickTunnel-windows/
+          cp -r tunnel-app/node_modules dist/OneClickTunnel-windows/
+          cp -r tunnel-app/README.md dist/OneClickTunnel-windows/
+          cp -r tunnel-app/run-app.bat dist/OneClickTunnel-windows/
+          cp run-tunnel-app.bat dist/OneClickTunnel-windows/
+          cd dist
+          zip -r OneClickTunnel-Windows-x64.zip OneClickTunnel-windows
+          cd ..
+
+      - name: Package Linux / macOS Portable Release
+        run: |
+          mkdir -p dist/OneClickTunnel-cross-platform
+          cp -r tunnel-app/server.js dist/OneClickTunnel-cross-platform/
+          cp -r tunnel-app/package.json dist/OneClickTunnel-cross-platform/
+          cp -r tunnel-app/public dist/OneClickTunnel-cross-platform/
+          cp -r tunnel-app/node_modules dist/OneClickTunnel-cross-platform/
+          cp -r tunnel-app/README.md dist/OneClickTunnel-cross-platform/
+          cat << 'EOF' > dist/OneClickTunnel-cross-platform/run.sh
+          #!/usr/bin/env bash
+          cd "$(dirname "$0")"
+          if command -v node >/dev/null 2>&1; then
+            node server.js
+          else
+            echo "Node.js is required. Please install Node.js (https://nodejs.org) to run this app."
+            exit 1
+          fi
+          EOF
+          chmod +x dist/OneClickTunnel-cross-platform/run.sh
+          cd dist
+          zip -r OneClickTunnel-CrossPlatform.zip OneClickTunnel-cross-platform
+          cd ..
+
+      - name: Create GitHub Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: One-Click Cloudflare Tunnel & File Sharing App ${{ github.event.inputs.version || github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## 🌐 One-Click Cloudflare Tunnel & File Sharing App
+
+            A zero-configuration desktop tool to expose any local server or share any folder from your laptop to the public internet using **Cloudflare Quick Tunnels** with an **instant scannable QR Code**.
+
+            ### 🚀 How to Run on Windows:
+            1. Download **`OneClickTunnel-Windows-x64.zip`** below.
+            2. Extract the ZIP file.
+            3. Double-click **`run-tunnel-app.bat`** (or `run-app.bat`).
+            4. The control panel will open automatically in your browser at `http://localhost:4455`!
+
+            ### ✨ Features:
+            - **Port Forwarding Mode**: Expose any local server (`localhost:3000`, `5173`, `8080`, etc.).
+            - **Folder Share / Web Drive Mode**: Share any local folder as an interactive file browser website with media preview.
+            - **Instant Scannable QR Code**: Open the link on any phone camera without typing.
+            - **100% Free**: No Cloudflare account, domain, or port-forwarding needed.
+          files: |
+            dist/OneClickTunnel-Windows-x64.zip
+            dist/OneClickTunnel-CrossPlatform.zip
