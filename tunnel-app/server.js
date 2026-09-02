@@ -337,6 +337,19 @@ function startFileServer(folderPath) {
   });
 }
 
+function killExistingTunnelProcess() {
+  if (tunnelProcess) {
+    try {
+      if (os.platform() === 'win32') {
+        exec(`taskkill /pid ${tunnelProcess.pid} /T /F`);
+      } else {
+        tunnelProcess.kill('SIGTERM');
+      }
+    } catch {}
+    tunnelProcess = null;
+  }
+}
+
 function stopFileServer() {
   if (fileServerInstance) {
     try {
@@ -350,7 +363,7 @@ function stopFileServer() {
 // Tunnel Process Management
 // -------------------------------------------------------------
 async function startTunnelProcess(targetPort) {
-  stopTunnelProcess();
+  killExistingTunnelProcess();
 
   const binPath = await ensureCloudflaredBinary();
   const targetUrl = `http://127.0.0.1:${targetPort}`;
@@ -433,16 +446,7 @@ async function startTunnelProcess(targetPort) {
 }
 
 function stopTunnelProcess() {
-  if (tunnelProcess) {
-    try {
-      if (os.platform() === 'win32') {
-        exec(`taskkill /pid ${tunnelProcess.pid} /T /F`);
-      } else {
-        tunnelProcess.kill('SIGTERM');
-      }
-    } catch {}
-    tunnelProcess = null;
-  }
+  killExistingTunnelProcess();
   stopFileServer();
 
   state.isActive = false;
