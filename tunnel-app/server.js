@@ -326,8 +326,8 @@ function startFileServer(folderPath) {
       }
     });
 
-    fileServerInstance = fileApp.listen(FILE_SERVER_PORT, '127.0.0.1', () => {
-      console.log(`[file-server] Serving folder "${folderPath}" on http://localhost:${FILE_SERVER_PORT}`);
+    fileServerInstance = fileApp.listen(FILE_SERVER_PORT, '0.0.0.0', () => {
+      console.log(`[file-server] Serving folder "${folderPath}" on http://127.0.0.1:${FILE_SERVER_PORT}`);
       resolve(FILE_SERVER_PORT);
     });
 
@@ -353,14 +353,14 @@ async function startTunnelProcess(targetPort) {
   stopTunnelProcess();
 
   const binPath = await ensureCloudflaredBinary();
-  const targetUrl = `http://localhost:${targetPort}`;
+  const targetUrl = `http://127.0.0.1:${targetPort}`;
 
   broadcastLog(`Starting Cloudflare Quick Tunnel forwarding to ${targetUrl}...`);
 
   return new Promise((resolve, reject) => {
     let resolved = false;
 
-    // Spawn cloudflared tunnel --url http://localhost:<port>
+    // Spawn cloudflared tunnel --url http://127.0.0.1:<port>
     tunnelProcess = spawn(binPath, ['tunnel', '--url', targetUrl], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -575,7 +575,7 @@ process.on('SIGTERM', () => {
 // -------------------------------------------------------------
 // Start Server
 // -------------------------------------------------------------
-server.listen(APP_PORT, '127.0.0.1', () => {
+server.listen(APP_PORT, '0.0.0.0', () => {
   console.log(`\n======================================================`);
   console.log(`🚀 One-Click Cloudflare Tunnel App is RUNNING!`);
   console.log(`🌐 Dashboard: http://localhost:${APP_PORT}`);
